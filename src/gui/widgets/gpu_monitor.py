@@ -94,6 +94,7 @@ class GPUMonitorWidget(QGroupBox):
         self.current_gpu_index = 0  # 当前选中的GPU索引
         self.display_mode = "multi"  # 显示模式：默认为多GPU模式
         self.gpu_cards = []  # 存储GPU卡片组件
+        self.cards_per_row = 4  # 每行最多显示的GPU卡片数量
         
         # 自动连接设置
         self._auto_connect_first_server = True
@@ -302,6 +303,8 @@ class GPUMonitorWidget(QGroupBox):
         self.gpu_cards_grid = QGridLayout(self.gpu_cards_container)
         self.gpu_cards_grid.setSpacing(5)
         self.gpu_cards_grid.setContentsMargins(0, 0, 0, 0)
+        self.gpu_cards_grid.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         multi_gpu_layout.addWidget(self.gpu_cards_container, 2)  # 2倍比例
 
         # 系统信息（多GPU视图）
@@ -684,20 +687,31 @@ class GPUMonitorWidget(QGroupBox):
                 card['widget'].setVisible(False)
             return
 
-        # 首先隐藏所有卡片
-        for card in self.gpu_cards:
-            card['widget'].setVisible(False)
+        gpu_count = len(stats.gpus)
 
-        # 确保有足够的GPU卡片
-        while len(self.gpu_cards) < len(stats.gpus):
+        # 调整卡片数量以匹配GPU数量
+        while len(self.gpu_cards) < gpu_count:
             idx = len(self.gpu_cards)
-            card_data = self._create_gpu_card(idx)
-            self.gpu_cards.append(card_data)
+            self.gpu_cards.append(self._create_gpu_card(idx))
+        while len(self.gpu_cards) > gpu_count:
+            card = self.gpu_cards.pop()
+            self.gpu_cards_grid.removeWidget(card['widget'])
+            card['widget'].deleteLater()
 
-            # 添加到网格布局
-            row = idx // 4  # 每行最多4个
-            col = idx % 4
-            self.gpu_cards_grid.addWidget(card_data['widget'], row, col)
+        # 重新布局，确保没有空白占位导致错行
+        while self.gpu_cards_grid.count():
+            item = self.gpu_cards_grid.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+
+        for col in range(self.cards_per_row):
+            self.gpu_cards_grid.setColumnStretch(col, 1)
+
+        for i, card in enumerate(self.gpu_cards):
+            row = i // self.cards_per_row
+            col = i % self.cards_per_row
+            self.gpu_cards_grid.addWidget(card['widget'], row, col)
+            card['widget'].setVisible(False)
 
         # 更新GPU卡片数据
         for i, gpu in enumerate(stats.gpus):
@@ -749,7 +763,7 @@ class GPUMonitorWidget(QGroupBox):
             # 显示当前卡片
             card['widget'].setVisible(True)
 
-        # 隐藏多余的卡片（虽然在开始时已经全部隐藏，这里为了代码清晰再次确认）
+        # 隐藏多余的卡片（安全检查）
         for i in range(len(stats.gpus), len(self.gpu_cards)):
             self.gpu_cards[i]['widget'].setVisible(False)
 

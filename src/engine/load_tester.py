@@ -172,6 +172,7 @@ class LoadTester:
         stream: Optional[bool] = None,
         timeout: Optional[int] = None,
         retry_count: Optional[int] = None,
+        prompts_override: Optional[List[str]] = None,
     ):
         self.backend_name = backend_name
         self.backend_key = _normalize_backend_key(backend_name)
@@ -186,10 +187,13 @@ class LoadTester:
         self.stream = stream
         self.timeout = timeout
         self.retry_count = retry_count
+        self.prompts_override = prompts_override
 
         self.backend_config = self._build_backend_config()
         self.backend = self._create_backend()
         self.client: Optional[APIClient] = None
+        self.gpu_samples: List[Dict[str, Any]] = []
+        self.cpu_samples: List[Dict[str, Any]] = []
 
         self._rate_lock = asyncio.Lock()
         self._next_slot = time.perf_counter()
@@ -223,6 +227,9 @@ class LoadTester:
 
     def _prepare_prompts(self) -> List[str]:
         prompts: List[str] = []
+
+        if self.prompts_override:
+            return list(self.prompts_override)
 
         raw_dataset = dataset_manager.get_offline_dataset_data()
         if raw_dataset:
@@ -272,6 +279,8 @@ class LoadTester:
         response: APIResponse = await self.client.generate(prompt)
         end = time.perf_counter()
 
+        total_tokens = (response.input_tokens or 0) + (response.output_tokens or 0)
+
         record = {
             "id": idx,
             "prompt": prompt[:200],
@@ -280,9 +289,11 @@ class LoadTester:
             "first_token_latency": response.first_token_latency,
             "input_tokens": response.input_tokens,
             "output_tokens": response.output_tokens,
-            "tokens": response.total_tokens,
+            "tokens": total_tokens,
             "generation_speed": response.generation_speed,
             "error": response.error_msg,
+            "start_ts": start,
+            "end_ts": end,
         }
         self.results.append(record)
 
@@ -319,6 +330,8 @@ class LoadTester:
         end_ts: float,
         gpu_summary: Dict[str, Any],
         cpu_summary: Dict[str, Any],
+        start_wall: Optional[float] = None,
+        end_wall: Optional[float] = None,
     ) -> Dict[str, Any]:
         durations = [r["duration"] for r in self.results if r.get("duration") is not None]
         first_tokens = [r["first_token_latency"] for r in self.results if r.get("first_token_latency")]
@@ -329,6 +342,7 @@ class LoadTester:
 
         total_input_tokens = sum(input_tokens)
         total_output_tokens = sum(output_tokens)
+        total_all_tokens = total_input_tokens + total_output_tokens
 
         summary = {
             "backend": self.backend_name,
@@ -339,6 +353,10 @@ class LoadTester:
             "requests": len(self.results),
             "success_rate": sum(1 for r in self.results if r["success"]) / len(self.results) if self.results else 0,
             "wall_time_sec": wall,
+            "start_perf": start_ts,
+            "end_perf": end_ts,
+            "start_time": datetime.fromtimestamp(start_wall).isoformat() if start_wall else None,
+            "end_time": datetime.fromtimestamp(end_wall).isoformat() if end_wall else None,
             "latency_avg": statistics.mean(durations) if durations else 0.0,
             "latency_p50": _percentile(durations, 50),
             "latency_p95": _percentile(durations, 95),
@@ -349,21 +367,24 @@ class LoadTester:
             "output_tokens_total": total_output_tokens,
             "throughput_input_tokens_per_s": (total_input_tokens / wall) if total_input_tokens else 0.0,
             "throughput_output_tokens_per_s": (total_output_tokens / wall) if total_output_tokens else 0.0,
-            "throughput_tokens_per_s": (total_output_tokens / wall) if total_output_tokens else 0.0,
+            "throughput_tokens_per_s": (total_all_tokens / wall) if total_all_tokens else 0.0,
             "qps_observed": (len(self.results) / wall) if self.results else 0.0,
+            "first_token_p50": _percentile(first_tokens, 50) if first_tokens else 0.0,
             "gpu": gpu_summary,
             "cpu": cpu_summary,
         }
         return summary
 
-    def _save_result(self, summary: Dict[str, Any], start_ts: float, end_ts: float):
+    def _save_result(self, summary: Dict[str, Any], start_ts: float, end_ts: float, start_wall: float, end_wall: float):
         result = {
             "backend": self.backend_name,
             "backend_config": self.backend_config,
-            "start_time": datetime.fromtimestamp(start_ts).isoformat(),
-            "end_time": datetime.fromtimestamp(end_ts).isoformat(),
+            "start_time": datetime.fromtimestamp(start_wall).isoformat(),
+            "end_time": datetime.fromtimestamp(end_wall).isoformat(),
             "summary": summary,
             "results": self.results,
+            "gpu_samples": self.gpu_samples,
+            "cpu_samples": self.cpu_samples,
         }
         filename = f"loadtest_{self.backend_key}_{summary.get('precision', 'na')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
         filepath = os.path.join(self.result_dir, filename)
@@ -371,6 +392,7 @@ class LoadTester:
             json.dump(result, f, ensure_ascii=False, indent=2)
         logger.info(f"压测结果已保存: {filepath}")
         self._export_csv(filepath, summary)
+        self._export_gpu_csv(filepath)
         self._export_charts(filepath)
         return filepath
 
@@ -383,8 +405,11 @@ class LoadTester:
             "first_token_latency",
             "input_tokens",
             "output_tokens",
+            "tokens",
             "generation_speed",
             "error",
+            "start_ts",
+            "end_ts",
         ]
         try:
             with open(csv_path, "w", newline="", encoding="utf-8") as f:
@@ -400,14 +425,61 @@ class LoadTester:
                         "first_token_latency": summary.get("first_token_avg"),
                         "input_tokens": summary.get("input_tokens_total"),
                         "output_tokens": summary.get("output_tokens_total"),
-                        "generation_speed": summary.get("throughput_output_tokens_per_s"),
+                        "tokens": summary.get("input_tokens_total", 0) + summary.get("output_tokens_total", 0),
+                        "generation_speed": summary.get("throughput_tokens_per_s"),
                         "error": "",
+                        "start_ts": summary.get("start_time"),
+                        "end_ts": summary.get("end_time"),
                     }
                 )
             logger.info(f"CSV 已生成: {csv_path}")
             return csv_path
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"生成 CSV 失败: {exc}")
+            return None
+
+    def _export_gpu_csv(self, json_path: str) -> Optional[str]:
+        if not self.gpu_samples and not self.cpu_samples:
+            return None
+        gpu_csv = json_path.replace(".json", "_gpu.csv")
+        fieldnames = [
+            "timestamp",
+            "gpu_util",
+            "gpu_memory_used",
+            "gpu_memory_total",
+            "cpu_percent",
+            "mem_percent",
+        ]
+        try:
+            with open(gpu_csv, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                for s in self.gpu_samples:
+                    writer.writerow(
+                        {
+                            "timestamp": s.get("timestamp"),
+                            "gpu_util": s.get("gpu_util"),
+                            "gpu_memory_used": s.get("gpu_memory_used"),
+                            "gpu_memory_total": s.get("gpu_memory_total"),
+                            "cpu_percent": "",
+                            "mem_percent": "",
+                        }
+                    )
+                for s in self.cpu_samples:
+                    writer.writerow(
+                        {
+                            "timestamp": s.get("timestamp"),
+                            "gpu_util": "",
+                            "gpu_memory_used": "",
+                            "gpu_memory_total": "",
+                            "cpu_percent": s.get("cpu_percent"),
+                            "mem_percent": s.get("mem_percent"),
+                        }
+                    )
+            logger.info(f"GPU/CPU 采样 CSV 已生成: {gpu_csv}")
+            return gpu_csv
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"生成 GPU/CPU CSV 失败: {exc}")
             return None
 
     def _export_charts(self, json_path: str) -> Optional[List[str]]:
@@ -453,6 +525,67 @@ class LoadTester:
                 plt.close()
                 chart_paths.append(throughput_path)
 
+            # QPS 随时间
+            if self.results:
+                start_ref = min(r.get("start_ts", 0) for r in self.results if r.get("start_ts") is not None)
+                buckets: Dict[int, int] = {}
+                for r in self.results:
+                    if r.get("start_ts") is None:
+                        continue
+                    sec = int(r["start_ts"] - start_ref)
+                    buckets[sec] = buckets.get(sec, 0) + 1
+                qps_series = sorted(buckets.items())
+                if qps_series:
+                    plt.figure()
+                    plt.plot([t for t, _ in qps_series], [v for _, v in qps_series], marker="o")
+                    plt.xlabel("Time (s)")
+                    plt.ylabel("Requests per second")
+                    plt.title("QPS Over Time")
+                    qps_path = f"{base_path}_qps.png"
+                    plt.savefig(qps_path)
+                    plt.close()
+                    chart_paths.append(qps_path)
+
+            # 首字节响应分布
+            fts = [r["first_token_latency"] for r in self.results if r.get("first_token_latency")]
+            if fts:
+                plt.figure()
+                plt.hist(fts, bins=20, color="darkorange")
+                plt.xlabel("First Token Latency (s)")
+                plt.ylabel("Count")
+                plt.title("First Token Latency Distribution")
+                ft_path = f"{base_path}_first_token.png"
+                plt.savefig(ft_path)
+                plt.close()
+                chart_paths.append(ft_path)
+
+            # GPU 利用率/显存占用随时间
+            if self.gpu_samples:
+                times = [s["timestamp"] - self.gpu_samples[0]["timestamp"] for s in self.gpu_samples]
+                utils = [s["gpu_util"] for s in self.gpu_samples]
+                mem_used = [s["gpu_memory_used"] for s in self.gpu_samples]
+                plt.figure()
+                plt.plot(times, utils, label="GPU Util (%)")
+                plt.xlabel("Time (s)")
+                plt.ylabel("Utilization %")
+                plt.title("GPU Utilization Over Time")
+                plt.legend()
+                gpu_util_path = f"{base_path}_gpu_util.png"
+                plt.savefig(gpu_util_path)
+                plt.close()
+                chart_paths.append(gpu_util_path)
+
+                plt.figure()
+                plt.plot(times, mem_used, label="GPU Memory Used (MB)", color="green")
+                plt.xlabel("Time (s)")
+                plt.ylabel("Memory (MB)")
+                plt.title("GPU Memory Over Time")
+                plt.legend()
+                gpu_mem_path = f"{base_path}_gpu_mem.png"
+                plt.savefig(gpu_mem_path)
+                plt.close()
+                chart_paths.append(gpu_mem_path)
+
             for p in chart_paths:
                 logger.info(f"图表已生成: {p}")
             return chart_paths
@@ -475,6 +608,7 @@ class LoadTester:
         cpu_interval = config.get("load_test.cpu_sample_interval", 2.0)
         cpu_sampler = CPUSampler(interval=cpu_interval)
 
+        start_wall = time.time()
         start_ts = time.perf_counter()
         gpu_sampler.start()
         cpu_sampler.start()
@@ -493,8 +627,19 @@ class LoadTester:
             await self.client.close()
 
         end_ts = time.perf_counter()
-        summary = self._aggregate(start_ts, end_ts, gpu_sampler.summary(), cpu_sampler.summary())
-        path = self._save_result(summary, start_ts, end_ts)
+        end_wall = time.time()
+        self.gpu_samples = gpu_sampler.samples
+        self.cpu_samples = cpu_sampler.samples
+
+        summary = self._aggregate(
+            start_ts,
+            end_ts,
+            gpu_sampler.summary(),
+            cpu_sampler.summary(),
+            start_wall,
+            end_wall,
+        )
+        path = self._save_result(summary, start_ts, end_ts, start_wall, end_wall)
         return summary, path
 
 

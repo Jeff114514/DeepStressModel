@@ -152,6 +152,41 @@ class TestRecordsManager:
                         if key in self.current_test_records:
                             results_tab.current_records[key] = self.current_test_records[key]
                 
+                # 统计完成情况并避免在进行中时重复写库
+                completed = (
+                    self.current_test_records.get("successful_tasks", 0)
+                    + self.current_test_records.get("failed_tasks", 0)
+                )
+                total_tasks = self.current_test_records.get("total_tasks", 0)
+                status = self.current_test_records.get("status", "running")
+
+                if completed > total_tasks:
+                    logger.warning(
+                        f"完成任务数({completed})大于总任务数({total_tasks})，将总任务数调整为已完成数量"
+                    )
+                    total_tasks = completed
+                    self.current_test_records["total_tasks"] = completed
+
+                if status == "error" and completed < total_tasks:
+                    logger.info(
+                        f"测试异常提前结束，调整总任务数为已完成数量: {completed}/{total_tasks}"
+                    )
+                    total_tasks = completed
+                    self.current_test_records["total_tasks"] = completed
+
+                if total_tasks <= 0:
+                    logger.warning("总任务数未设置或为0，暂不保存测试记录")
+                    return
+
+                if status == "running" and completed < total_tasks:
+                    logger.debug(
+                        f"测试进行中，已完成 {completed}/{total_tasks}，跳过中间态数据库保存"
+                    )
+                    return
+
+                # 确保 results_tab 内的总任务数与当前记录一致
+                results_tab.current_records["total_tasks"] = total_tasks
+                
                 # 保存记录
                 results_tab._save_test_records()
                 logger.debug("测试记录已同步到 results_tab")

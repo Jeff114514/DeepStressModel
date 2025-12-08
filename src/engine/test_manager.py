@@ -380,13 +380,14 @@ class TestManager(QObject):
                 f.write("-" * 50 + "\n\n")
             
             # 创建进度对象
-            # 计算实际任务数量 - 根据并发数限制每个数据集的任务数
+            # 计算实际任务数量 - 根据并发数与可用prompt数量共同限制
             total_prompts = 0
+            task_prompt_counts = []
             for task in tasks:
-                # 每个并发处理一个任务，所以任务数 = 并发数
-                task_count = task.concurrency
+                task_count = min(task.concurrency, len(task.prompts))
                 total_prompts += task_count
-                logger.info(f"数据集 {task.dataset_name} 实际执行任务数: {task_count}")
+                task_prompt_counts.append((task, task_count))
+                logger.info(f"数据集 {task.dataset_name} 实际执行任务数: {task_count} (并发={task.concurrency}, prompts={len(task.prompts)})")
             
             self.progress = TestProgress(
                 test_task_id=test_task_id,
@@ -409,11 +410,14 @@ class TestManager(QObject):
             result_queue = asyncio.Queue()
             
             # 添加任务到队列 - 根据并发数限制每个数据集的任务数
-            for task in tasks:
+            for task, task_count in task_prompt_counts:
+                if task_count <= 0:
+                    logger.warning(f"数据集 {task.dataset_name} 无可用任务，已跳过")
+                    continue
                 # 从prompts中随机选择任务数量的prompt
                 selected_prompts = random.sample(
                     task.prompts, 
-                    min(task.concurrency, len(task.prompts))
+                    task_count
                 )
                 
                 for prompt in selected_prompts:
