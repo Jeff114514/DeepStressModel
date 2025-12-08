@@ -644,8 +644,13 @@ class TestTab(QWidget):
             # 更新统计信息
             current_records = self.records_manager.current_test_records
             if current_records:
+                current_records["total_tasks"] = progress.total_tasks
                 current_records["successful_tasks"] = progress.successful_tasks
                 current_records["failed_tasks"] = progress.failed_tasks
+                current_records["avg_response_time"] = progress.avg_response_time
+                current_records["avg_generation_speed"] = progress.avg_generation_speed
+                current_records["avg_tps"] = progress.avg_tps
+                current_records["current_speed"] = progress.current_speed
                 
                 # 只在每10个任务完成时同步一次记录
                 if completed % 10 == 0:
@@ -679,6 +684,12 @@ class TestTab(QWidget):
             
             # 添加平均TPS
             detail_text += self.tr('avg_tps') + f": {progress.avg_tps:.1f}\n"
+
+            # 添加QPS（按壁钟）
+            detail_text += "QPS: " + f"{progress.qps:.2f}\n"
+
+            # 添加首字节/首token延迟
+            detail_text += "首字节延迟: " + f"{progress.avg_first_token:.2f}s\n"
             
             # 添加最后一次错误信息
             if progress.last_error:
@@ -781,6 +792,7 @@ class TestTab(QWidget):
             dataset_stats = current_records["datasets"].get(dataset_name)
             if not dataset_stats:
                 return
+            dataset_stats.setdefault("start_time", time.time())
                 
             if response.success:
                 dataset_stats["successful"] += 1
@@ -795,20 +807,18 @@ class TestTab(QWidget):
                         dataset_stats["start_time"]
                     
                     if dataset_stats["total_time"] > 0:
-                        # 考虑并发数计算平均生成速度
+                        # 平均生成速度按总产出/耗时计算（不再二次除以并发）
                         dataset_stats["avg_generation_speed"] = (
-                            dataset_stats["total_chars"] / dataset_stats["total_time"] / 
-                            dataset_stats["concurrency"]  # 除以并发数
+                            dataset_stats["total_chars"] / dataset_stats["total_time"]
                         )
                         # 当前速度仍然使用单次响应的速度
                         dataset_stats["current_speed"] = (
                             response.total_chars / response.duration
                             if response.duration > 0 else 0
                         )
-                        # 考虑并发数计算TPS
+                        # TPS按总token产出/耗时计算
                         dataset_stats["avg_tps"] = (
-                            dataset_stats["total_tokens"] / dataset_stats["total_time"] / 
-                            dataset_stats["concurrency"]  # 除以并发数
+                            dataset_stats["total_tokens"] / dataset_stats["total_time"]
                         )
                 
                 # 更新总体统计
@@ -823,22 +833,20 @@ class TestTab(QWidget):
                 
                 if current_records["successful_tasks"] > 0:
                     if current_records["total_time"] > 0:
-                        # 考虑总并发数计算总体平均生成速度
+                        # 总体平均生成速度按总产出/耗时计算
                         current_records["avg_generation_speed"] = (
                             current_records["total_chars"] / 
-                            current_records["total_time"] / 
-                            current_records["concurrency"]  # 除以总并发数
+                            current_records["total_time"]
                         )
                         # 当前速度仍然使用单次响应的速度
                         current_records["current_speed"] = (
                             response.total_chars / response.duration
                             if response.duration > 0 else 0
                         )
-                        # 考虑总并发数计算总体TPS
+                        # 总体TPS按总token产出/耗时计算
                         current_records["avg_tps"] = (
                             current_records["total_tokens"] / 
-                            current_records["total_time"] / 
-                            current_records["concurrency"]  # 除以总并发数
+                            current_records["total_time"]
                         )
             else:
                 dataset_stats["failed"] += 1

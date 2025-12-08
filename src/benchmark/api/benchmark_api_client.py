@@ -66,7 +66,9 @@ class BenchmarkAPIClient:
     async def _ensure_session(self):
         """确保HTTP会话已创建"""
         if self.session is None or self.session.closed:
+            connector = aiohttp.TCPConnector(limit=0, limit_per_host=0)
             self.session = aiohttp.ClientSession(
+                connector=connector,
                 timeout=aiohttp.ClientTimeout(
                     connect=self.connect_timeout,
                     sock_connect=self.connect_timeout,

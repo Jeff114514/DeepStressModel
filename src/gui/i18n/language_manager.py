@@ -8,10 +8,20 @@ class LanguageManager(QObject):
     _instance = None
     
     def __new__(cls):
+        # 单例创建，首次同时初始化 QObject 基类
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialize()
+            obj = super().__new__(cls)
+            QObject.__init__(obj)
+            obj._initialized = False
+            cls._instance = obj
         return cls._instance
+    
+    def __init__(self):
+        # 避免重复初始化，但确保基类已在 __new__ 中初始化
+        if getattr(self, "_initialized", False):
+            return
+        self._initialize()
+        self._initialized = True
     
     def _initialize(self):
         """初始化语言管理器"""

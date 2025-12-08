@@ -110,11 +110,33 @@ class DatabaseManager:
                 self.conn.commit()
                 logger.info("已更新测试记录表结构")
             
-            # 更新数据库版本到 2
-            if current_version != 2:
-                self.cursor.execute("INSERT INTO db_version (version) VALUES (2)")
+            # 更新数据库版本到 2，仅在缺少时插入
+            if current_version < 2:
+                self.cursor.execute("INSERT OR IGNORE INTO db_version (version) VALUES (2)")
                 self.conn.commit()
                 logger.info("数据库版本已更新到 2")
+
+            # 新增版本 3: 支持多后端/精度/自定义头体配置
+            if current_version < 3:
+                logger.info("执行数据库迁移: 版本 2 -> 3 (model_configs 扩展字段)")
+                alter_statements = [
+                    "ALTER TABLE model_configs ADD COLUMN backend TEXT DEFAULT 'openai'",
+                    "ALTER TABLE model_configs ADD COLUMN precision TEXT",
+                    "ALTER TABLE model_configs ADD COLUMN chat_path TEXT",
+                    "ALTER TABLE model_configs ADD COLUMN stream INTEGER",
+                    "ALTER TABLE model_configs ADD COLUMN extra_headers TEXT",
+                    "ALTER TABLE model_configs ADD COLUMN extra_body_params TEXT",
+                ]
+                for stmt in alter_statements:
+                    try:
+                        self.cursor.execute(stmt)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(f"迁移执行警告: {stmt} -> {exc}")
+                self.conn.commit()
+                # 将版本号写入（若已存在则跳过）
+                self.cursor.execute("INSERT OR IGNORE INTO db_version (version) VALUES (3)")
+                self.conn.commit()
+                logger.info("数据库版本已更新到 3")
                 
         except Exception as e:
             logger.error(f"数据库迁移失败: {e}", exc_info=True)
@@ -135,6 +157,12 @@ class DatabaseManager:
                     max_tokens INTEGER,
                     temperature REAL,
                     top_p REAL,
+                    backend TEXT DEFAULT 'openai',
+                    precision TEXT,
+                    chat_path TEXT,
+                    stream INTEGER,
+                    extra_headers TEXT,
+                    extra_body_params TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -240,11 +268,36 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"初始化默认数据失败: {e}")
 
+    @staticmethod
+    def _parse_json_field(raw_value: Any) -> Dict:
+        """解析存储为 TEXT 的 JSON 字段"""
+        if raw_value is None:
+            return {}
+        if isinstance(raw_value, dict):
+            return raw_value
+        try:
+            return json.loads(raw_value)
+        except Exception:
+            return {}
+
     def get_model_configs(self) -> List[Dict]:
         """获取所有模型配置"""
         try:
             self.cursor.execute("SELECT * FROM model_configs ORDER BY created_at DESC")
-            return [dict(row) for row in self.cursor.fetchall()]
+            configs = []
+            for row in self.cursor.fetchall():
+                cfg = dict(row)
+                # 解析 JSON 字段
+                cfg["extra_headers"] = self._parse_json_field(cfg.get("extra_headers"))
+                cfg["extra_body_params"] = self._parse_json_field(cfg.get("extra_body_params"))
+                # 统一 stream 为布尔
+                if "stream" in cfg and cfg["stream"] is not None:
+                    cfg["stream"] = bool(cfg["stream"])
+                # 后端与精度默认值
+                cfg.setdefault("backend", "openai")
+                cfg.setdefault("precision", None)
+                configs.append(cfg)
+            return configs
         except Exception as e:
             logger.error(f"获取模型配置失败: {e}")
             return []
@@ -260,8 +313,9 @@ class DatabaseManager:
                 
             self.cursor.execute('''
                 INSERT INTO model_configs 
-                (name, api_url, api_key, model, max_tokens, temperature, top_p)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (name, api_url, api_key, model, max_tokens, temperature, top_p,
+                 backend, precision, chat_path, stream, extra_headers, extra_body_params)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 config_data["name"],
                 config_data["api_url"],
@@ -269,7 +323,13 @@ class DatabaseManager:
                 config_data["model"],
                 config_data.get("max_tokens", 2000),
                 config_data.get("temperature", 0.7),
-                config_data.get("top_p", 0.9)
+                config_data.get("top_p", 0.9),
+                config_data.get("backend", "openai"),
+                config_data.get("precision"),
+                config_data.get("chat_path"),
+                int(config_data["stream"]) if config_data.get("stream") is not None else None,
+                json.dumps(config_data.get("extra_headers", {}) or {}, ensure_ascii=False),
+                json.dumps(config_data.get("extra_body_params", {}) or {}, ensure_ascii=False),
             ))
             self.conn.commit()
             return True
@@ -282,7 +342,9 @@ class DatabaseManager:
         try:
             self.cursor.execute('''
                 UPDATE model_configs 
-                SET api_url = ?, api_key = ?, model = ?, max_tokens = ?, temperature = ?, top_p = ?
+                SET api_url = ?, api_key = ?, model = ?, max_tokens = ?, temperature = ?, top_p = ?,
+                    backend = ?, precision = ?, chat_path = ?, stream = ?,
+                    extra_headers = ?, extra_body_params = ?
                 WHERE name = ?
             ''', (
                 config_data["api_url"],
@@ -291,6 +353,12 @@ class DatabaseManager:
                 config_data.get("max_tokens", 2000),
                 config_data.get("temperature", 0.7),
                 config_data.get("top_p", 0.9),
+                config_data.get("backend", "openai"),
+                config_data.get("precision"),
+                config_data.get("chat_path"),
+                int(config_data["stream"]) if config_data.get("stream") is not None else None,
+                json.dumps(config_data.get("extra_headers", {}) or {}, ensure_ascii=False),
+                json.dumps(config_data.get("extra_body_params", {}) or {}, ensure_ascii=False),
                 config_data["name"]
             ))
             self.conn.commit()

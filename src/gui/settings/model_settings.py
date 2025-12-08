@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QSpinBox, QDoubleSpinBox,
     QPushButton, QListWidget, QMessageBox, QFormLayout,
-    QDialog, QTextEdit, QFileDialog, QComboBox
+    QDialog, QTextEdit, QFileDialog, QComboBox, QCheckBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from src.utils.logger import setup_logger
@@ -37,6 +37,25 @@ class ModelEditDialog(QDialog):
         # API地址输入
         self.api_url_input = QLineEdit()
         layout.addRow(self.tr('api_url') + ":", self.api_url_input)
+
+        # 后端选择
+        self.backend_combo = QComboBox()
+        self.backend_combo.addItems(["openai", "vllm", "llamacpp", "sglang", "tgi"])
+        layout.addRow("Backend:", self.backend_combo)
+
+        # 精度选择
+        self.precision_combo = QComboBox()
+        self.precision_combo.addItems(["auto", "bf16", "gguf"])
+        layout.addRow("Precision:", self.precision_combo)
+
+        # Chat path
+        self.chat_path_input = QLineEdit()
+        self.chat_path_input.setPlaceholderText("/chat/completions")
+        layout.addRow("Chat Path:", self.chat_path_input)
+
+        # 流式开关
+        self.stream_checkbox = QCheckBox("强制流式")
+        layout.addRow("", self.stream_checkbox)
         
         # API密钥输入
         self.api_key_input = QLineEdit()
@@ -66,6 +85,18 @@ class ModelEditDialog(QDialog):
         self.top_p_input.setSingleStep(0.1)
         self.top_p_input.setValue(0.9)
         layout.addRow(self.tr('top_p') + ":", self.top_p_input)
+
+        # 额外Headers
+        self.extra_headers_input = QTextEdit()
+        self.extra_headers_input.setPlaceholderText('{"Authorization": "Bearer xxx"}')
+        self.extra_headers_input.setFixedHeight(60)
+        layout.addRow("Extra Headers(JSON):", self.extra_headers_input)
+
+        # 额外Body参数
+        self.extra_body_input = QTextEdit()
+        self.extra_body_input.setPlaceholderText('{"stop": ["\\n\\n"]}')
+        self.extra_body_input.setFixedHeight(60)
+        layout.addRow("Extra Body(JSON):", self.extra_body_input)
         
         # 按钮
         button_box = QHBoxLayout()
@@ -88,6 +119,15 @@ class ModelEditDialog(QDialog):
         self.max_tokens_input.setValue(self.model_data.get("max_tokens", 2048))
         self.temperature_input.setValue(self.model_data.get("temperature", 0.7))
         self.top_p_input.setValue(self.model_data.get("top_p", 0.9))
+        self.backend_combo.setCurrentText(self.model_data.get("backend", "openai"))
+        precision = self.model_data.get("precision") or "auto"
+        self.precision_combo.setCurrentText(precision)
+        self.chat_path_input.setText(self.model_data.get("chat_path", ""))
+        self.stream_checkbox.setChecked(bool(self.model_data.get("stream")))
+        # JSON字段
+        import json
+        self.extra_headers_input.setText(json.dumps(self.model_data.get("extra_headers", {}) or {}, ensure_ascii=False, indent=2))
+        self.extra_body_input.setText(json.dumps(self.model_data.get("extra_body_params", {}) or {}, ensure_ascii=False, indent=2))
     
     def get_model_data(self) -> dict:
         """获取模型数据"""
@@ -98,8 +138,25 @@ class ModelEditDialog(QDialog):
             "model": self.model_input.text().strip(),
             "max_tokens": self.max_tokens_input.value(),
             "temperature": self.temperature_input.value(),
-            "top_p": self.top_p_input.value()
+            "top_p": self.top_p_input.value(),
+            "backend": self.backend_combo.currentText(),
+            "precision": None if self.precision_combo.currentText() == "auto" else self.precision_combo.currentText(),
+            "chat_path": self.chat_path_input.text().strip() or None,
+            "stream": self.stream_checkbox.isChecked(),
+            "extra_headers": self._parse_json_safe(self.extra_headers_input.toPlainText()),
+            "extra_body_params": self._parse_json_safe(self.extra_body_input.toPlainText()),
         }
+
+    @staticmethod
+    def _parse_json_safe(text: str) -> dict:
+        """容错解析 JSON 文本"""
+        import json
+        if not text.strip():
+            return {}
+        try:
+            return json.loads(text)
+        except Exception:
+            return {}
     
     def tr(self, key):
         """翻译文本"""
@@ -241,7 +298,10 @@ class ModelSettingsWidget(QWidget):
         <b>{self.tr('model_name')}：</b> {model.get('model', 'N/A')}<br>
         <b>{self.tr('max_tokens')}：</b> {model.get('max_tokens', 'N/A')}<br>
         <b>Temperature：</b> {model.get('temperature', 'N/A')}<br>
-        <b>{self.tr('top_p')}：</b> {model.get('top_p', 'N/A')}
+        <b>{self.tr('top_p')}：</b> {model.get('top_p', 'N/A')}<br>
+        <b>Backend：</b> {model.get('backend', 'openai')}<br>
+        <b>Precision：</b> {model.get('precision', 'auto')}<br>
+        <b>Stream：</b> {bool(model.get('stream'))}
         """
         self.details_label.setText(details)
     

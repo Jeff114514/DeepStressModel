@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple, Optional, Callable
 from dataclasses import dataclass
 from PyQt6.QtCore import QObject, pyqtSignal
 from src.utils.logger import setup_logger
+from src.engine.backends import get_backend_class, BackendOptions
 from src.engine.api_client import APIClient, APIResponse
 from src.utils.config import config
 
@@ -38,10 +39,14 @@ class TestProgress:
     last_error: str = ""
     dataset_stats: Dict[str, Dict] = None
     current_speed: float = 0.0  # 添加当前速度属性
+    start_time: float = time.time()
+    first_token_latencies: List[float] = None
     
     def __post_init__(self):
         if self.dataset_stats is None:
             self.dataset_stats = {}
+        if self.first_token_latencies is None:
+            self.first_token_latencies = []
     
     @property
     def avg_speed(self) -> float:
@@ -54,6 +59,20 @@ class TestProgress:
         if self.total_tasks == 0:
             return 0.0
         return (self.completed_tasks / self.total_tasks) * 100
+
+    @property
+    def qps(self) -> float:
+        """按壁钟时间计算的QPS"""
+        elapsed = time.time() - self.start_time
+        if elapsed <= 0:
+            return 0.0
+        return (self.completed_tasks or 0) / elapsed
+
+    @property
+    def avg_first_token(self) -> float:
+        if not self.first_token_latencies:
+            return 0.0
+        return sum(self.first_token_latencies) / len(self.first_token_latencies)
     
     def update(self, dataset_name: str, response: APIResponse):
         """更新进度"""
@@ -99,6 +118,8 @@ class TestProgress:
                 self.avg_response_time = total_time / self.successful_tasks
                 self.avg_generation_speed = total_chars / total_time
                 self.avg_tps = total_tokens / total_time
+            if response.first_token_latency:
+                self.first_token_latencies.append(response.first_token_latency)
         else:
             self.failed_tasks += 1
             stats["failed"] += 1
@@ -122,17 +143,23 @@ class TestManager(QObject):
         # 从配置中获取超时和重试次数
         timeout = config.get("test.timeout", 10)
         retry_count = config.get("test.retry_count", 1)
-        
-        return APIClient(
-            api_url=model_config["api_url"],
-            api_key=model_config["api_key"],
-            model=model_config["model"],
-            max_tokens=model_config.get("max_tokens", 2048),
-            temperature=model_config.get("temperature", 0.7),
-            top_p=model_config.get("top_p", 0.9),
-            timeout=timeout,
-            retry_count=retry_count
+
+        backend_name = model_config.get("backend", "openai")
+        backend_cls = get_backend_class(backend_name)
+
+        options = BackendOptions(
+            api_url=model_config.get("api_url", ""),
+            api_key=model_config.get("api_key", ""),
+            model=model_config.get("model", ""),
+            chat_path=model_config.get("chat_path", None),
+            precision=model_config.get("precision"),
+            extra_headers=model_config.get("extra_headers", {}) or {},
+            extra_body_params=model_config.get("extra_body_params", {}) or {},
+            stream=model_config.get("stream"),
         )
+
+        backend = backend_cls(options)
+        return backend.create_client(timeout=timeout, retry_count=retry_count)
     
     def _update_progress(self, dataset_name: str, response: APIResponse, error_msg: str = ""):
         """更新测试进度"""

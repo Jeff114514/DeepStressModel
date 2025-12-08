@@ -420,9 +420,15 @@ class GPUMonitorWidget(QGroupBox):
         try:
             from src.data.db_manager import db_manager
             active_server = db_manager.get_active_gpu_server()
-            if active_server and not self._monitor_initialized:  # 只在未初始化时初始化
+            # 无论远程是否存在，都初始化（会回退本地）
+            if not self._monitor_initialized:
                 gpu_monitor.init_monitor()
                 self._monitor_initialized = True
+
+            # 本地模式时 active_server 为空，为了触发采集，设置占位
+            if not active_server:
+                active_server = {"id": "local", "name": "local"}
+
             self.monitor_thread.set_active_server(active_server)
         except Exception as e:
             logger.error(f"获取活动服务器配置失败: {e}")
@@ -466,6 +472,13 @@ class GPUMonitorWidget(QGroupBox):
             active_index = -1
             found_server = False
 
+            # 若没有远程服务器，添加本地占位项
+            if not servers:
+                self.server_selector.addItem("本地 (自动)", "local")
+                active_server = {"id": "local", "name": "local"}
+                found_server = True
+                active_index = 0
+
             for i, server in enumerate(servers):
                 # 安全地获取名称，如果alias不存在则使用name或host
                 display_name = server.get('host', '')
@@ -503,7 +516,10 @@ class GPUMonitorWidget(QGroupBox):
                 self.server_selector.setCurrentIndex(0)
 
             if not servers:
-                self.show_no_servers_hint()
+                # 本地模式提示
+                self.hint_label.setText(self.tr('gpu_monitor') + "：已切换本地采集")
+                self.stacked_layout.setVisible(True)
+                self.status_label.setVisible(True)
 
         except Exception as e:
             logger.error(f"刷新服务器列表失败: {e}")
@@ -674,12 +690,13 @@ class GPUMonitorWidget(QGroupBox):
 
         # 确保有足够的GPU卡片
         while len(self.gpu_cards) < len(stats.gpus):
-            card_data = self._create_gpu_card(len(self.gpu_cards))
+            idx = len(self.gpu_cards)
+            card_data = self._create_gpu_card(idx)
             self.gpu_cards.append(card_data)
 
             # 添加到网格布局
-            row = len(self.gpu_cards) // 4  # 每行最多4个
-            col = len(self.gpu_cards) % 4
+            row = idx // 4  # 每行最多4个
+            col = idx % 4
             self.gpu_cards_grid.addWidget(card_data['widget'], row, col)
 
         # 更新GPU卡片数据

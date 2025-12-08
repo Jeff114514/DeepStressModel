@@ -55,6 +55,54 @@ DEFAULT_CONFIG = {
             "default_format": "json"                            # 默认导出格式
         }
     },
+    # OpenAI兼容压测后端配置（占位默认值，需按实际填写）
+    "openai_benchmarks": {
+        "defaults": {
+            "chat_path": "/chat/completions",
+            "extra_headers": {},
+            "extra_body_params": {},
+            "precision": "bf16"
+        },
+        "vllm": {
+            "api_url": "",
+            "api_key": "",
+            "model": "",
+            "precision": "bf16",
+            "extra_body_params": {}
+        },
+        "llamacpp": {
+            "api_url": "",
+            "api_key": "",
+            "model": "",
+            "precision": "gguf",
+            "extra_body_params": {}
+        },
+        "sglang": {
+            "api_url": "",
+            "api_key": "",
+            "model": "",
+            "precision": "bf16",
+            "extra_body_params": {}
+        },
+        "tgi": {
+            "api_url": "",
+            "api_key": "",
+            "model": "",
+            "precision": "bf16",
+            "extra_body_params": {}
+        }
+    },
+    # 压测默认参数
+    "load_test": {
+        "default_dataset": "基础问答",
+        "concurrency": 4,
+        "qps": None,
+        "duration_seconds": 30,
+        "total_requests": 40,
+        "max_new_tokens": 256,
+        "stream": True,
+        "gpu_sample_interval": 2.0
+    },
     "test": {
         "default_concurrency": 1,
         "max_concurrency": 9999,

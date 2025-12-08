@@ -72,8 +72,8 @@ class TestRecordsManager:
                 # 计算每个数据集的实际并发数
                 dataset_concurrency = max(
                     1, int((weight / total_weight) * total_concurrency))
-                # 使用并发数作为该数据集的任务数
-                dataset_tasks = dataset_concurrency
+                # 实际任务数取并发与可用prompt数量的较小值
+                dataset_tasks = min(len(prompts), dataset_concurrency)
                 total_tasks += dataset_tasks
                 
                 logger.info(

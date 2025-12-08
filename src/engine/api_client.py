@@ -72,22 +72,29 @@ class APIResponse:
         success: bool,
         response_text: str = "",
         error_msg: str = "",
-        tokens_generated: int = 0,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
         duration: float = 0.0,
         start_time: float = 0.0,
         end_time: float = 0.0,
         model_name: str = "",
-        stream_stats: Optional[StreamStats] = None
+        stream_stats: Optional[StreamStats] = None,
+        first_token_latency: Optional[float] = None
     ):
         self.success = success
         self.response_text = response_text
         self.error_msg = error_msg
-        self.tokens_generated = tokens_generated
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        # 兼容旧字段命名
+        self.tokens_generated = output_tokens
         self.duration = duration
         self.start_time = start_time
         self.end_time = end_time
         self.model_name = model_name
         self.stream_stats = stream_stats
+        # 首字节/首token延迟（秒）
+        self.first_token_latency = first_token_latency
     
     @property
     def generation_speed(self) -> float:
@@ -108,7 +115,7 @@ class APIResponse:
     @property
     def total_tokens(self) -> int:
         """获取总token数"""
-        return self.tokens_generated
+        return self.output_tokens
 
 class APIClient:
     """API客户端类"""
@@ -121,7 +128,12 @@ class APIClient:
         temperature: float = 0.7,
         top_p: float = 0.9,
         timeout: int = 10,  # 添加超时参数
-        retry_count: int = 1  # 添加重试次数参数
+        retry_count: int = 1,  # 添加重试次数参数
+        chat_path: str = "/chat/completions",
+        extra_headers: Optional[Dict[str, str]] = None,
+        extra_body_params: Optional[Dict[str, Any]] = None,
+        precision: Optional[str] = None,
+        stream: Optional[bool] = None
     ):
         # 确保 API URL 格式正确
         self.api_url = api_url.rstrip("/")
@@ -129,6 +141,7 @@ class APIClient:
             self.api_url += "/v1"
         self.api_key = api_key
         self.model = model
+        self.chat_path = chat_path
         
         # 使用传入的超时和重试设置
         self.connect_timeout = timeout
@@ -145,11 +158,21 @@ class APIClient:
             "temperature": temperature,
             "top_p": top_p
         }
+        if precision:
+            # 兼容不同后端的精度参数
+            self.model_params["precision"] = precision
+        if extra_body_params:
+            self.model_params.update(extra_body_params)
+        # 允许覆盖流模式
+        self._force_stream = stream
+        # 附加请求头
+        self.extra_headers = extra_headers or {}
         
-        # 创建异步HTTP会话
-        self.session = aiohttp.ClientSession(
-            headers={"Authorization": f"Bearer {api_key}"}
-        )
+        # 创建异步HTTP会话，禁用连接并发限制
+        default_headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        default_headers.update(self.extra_headers)
+        connector = aiohttp.TCPConnector(limit=0, limit_per_host=0)
+        self.session = aiohttp.ClientSession(headers=default_headers, connector=connector)
         logger.info(f"初始化 API 客户端: URL={api_url}, model={model}, connect_timeout={self.connect_timeout}, max_retries={self.max_retries}")
     
     async def close(self):
@@ -160,8 +183,10 @@ class APIClient:
     
     def _prepare_request(self, prompt: str) -> dict:
         """准备请求数据"""
-        # 根据配置决定是否使用流式输出
-        use_stream = config.get('openai_api.stream_mode', True)
+        # 根据配置决定是否使用流式输出（允许外部强制覆盖）
+        use_stream = self._force_stream
+        if use_stream is None:
+            use_stream = config.get('openai_api.stream_mode', True)
         
         return {
             "model": self.model,
@@ -202,14 +227,18 @@ class APIClient:
         start_time = time.time()
         stream_stats = StreamStats(self.model)  # 传入模型名称
         full_response = []
+        first_token_latency = None
+        prompt_tokens = token_counter.count_tokens(prompt, self.model)
         
         # 根据配置决定是否使用流式输出
-        use_stream = config.get('openai_api.stream_mode', True)
+        use_stream = self._force_stream
+        if use_stream is None:
+            use_stream = config.get('openai_api.stream_mode', True)
         
         for attempt in range(self.max_retries):
             try:
                 async with self.session.post(
-                    f"{self.api_url}/chat/completions",  # 修改 URL 路径
+                    f"{self.api_url}{self.chat_path}",  # 允许自定义路径
                     json={
                         "model": self.model,
                         "messages": [{"role": "user", "content": prompt}],
@@ -231,17 +260,21 @@ class APIClient:
                                 async for chunk in self._process_stream(response):
                                     full_response.append(chunk)
                                     stream_stats.update(chunk)
+                                    if first_token_latency is None:
+                                        first_token_latency = time.time() - start_time
                                 
                                 end_time = time.time()
                                 return APIResponse(
                                     success=True,
                                     response_text="".join(full_response),
-                                    tokens_generated=stream_stats.total_tokens,
+                                    input_tokens=prompt_tokens,
+                                    output_tokens=stream_stats.total_tokens,
                                     duration=end_time - start_time,
                                     start_time=start_time,
                                     end_time=end_time,
                                     model_name=self.model,
-                                    stream_stats=stream_stats
+                                    stream_stats=stream_stats,
+                                    first_token_latency=first_token_latency
                                 )
                             else:
                                 # 非流式输出处理
@@ -253,17 +286,19 @@ class APIClient:
                                 
                                 # 更新流统计（虽然不是流式但仍需要计算速度）
                                 stream_stats.update(response_text)
-                                
                                 end_time = time.time()
+                                first_token_latency = end_time - start_time
                                 return APIResponse(
                                     success=True,
                                     response_text=response_text,
-                                    tokens_generated=tokens_generated,
+                                    input_tokens=prompt_tokens,
+                                    output_tokens=tokens_generated,
                                     duration=end_time - start_time,
                                     start_time=start_time,
                                     end_time=end_time,
                                     model_name=self.model,
-                                    stream_stats=stream_stats
+                                    stream_stats=stream_stats,
+                                    first_token_latency=first_token_latency
                                 )
                         except Exception as e:
                             logger.error(f"流式输出中断: {e}")
@@ -274,7 +309,8 @@ class APIClient:
                                 success=False,
                                 response_text=response_text,
                                 error_msg=f"流式输出中断: {str(e)}",
-                                tokens_generated=stream_stats.total_tokens,
+                                input_tokens=prompt_tokens,
+                                output_tokens=stream_stats.total_tokens,
                                 duration=end_time - start_time,
                                 start_time=start_time,
                                 end_time=end_time,
@@ -288,6 +324,7 @@ class APIClient:
                             return APIResponse(
                                 success=False,
                                 error_msg=f"HTTP {response.status}: {error_text}",
+                                input_tokens=prompt_tokens,
                                 duration=time.time() - start_time,
                                 start_time=start_time,
                                 end_time=time.time()
@@ -300,6 +337,7 @@ class APIClient:
                     return APIResponse(
                         success=False,
                         error_msg=error_msg,
+                                input_tokens=prompt_tokens,
                         duration=time.time() - start_time,
                         start_time=start_time,
                         end_time=time.time()
@@ -311,6 +349,7 @@ class APIClient:
                     return APIResponse(
                         success=False,
                         error_msg=str(e),
+                                input_tokens=prompt_tokens,
                         duration=time.time() - start_time,
                         start_time=start_time,
                         end_time=time.time()
@@ -323,6 +362,7 @@ class APIClient:
         return APIResponse(
             success=False,
             error_msg="未知错误",
+            input_tokens=prompt_tokens,
             duration=time.time() - start_time,
             start_time=start_time,
             end_time=time.time()
