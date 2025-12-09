@@ -6,6 +6,7 @@ import asyncio
 import csv
 import json
 import os
+import random
 import statistics
 import time
 from datetime import datetime
@@ -196,6 +197,7 @@ class LoadTester:
         self.timeout = timeout
         self.retry_count = retry_count
         self.prompts_override = prompts_override
+        self.use_local_dataset = bool(prompts_override is None and (dataset_name or dataset_manager.get_offline_dataset_data()))
 
         self.backend_config = self._build_backend_config()
         self.backend = self._create_backend()
@@ -258,6 +260,16 @@ class LoadTester:
 
         if not prompts:
             raise ValueError("未找到可用的测试提示，请先加载或配置数据集")
+
+        # 数据集模式：按 total_requests 采样，避免超大数据集全量加载
+        if self.use_local_dataset and self.total_requests:
+            if len(prompts) >= self.total_requests:
+                prompts = random.sample(prompts, self.total_requests)
+            else:
+                prompts = random.choices(prompts, k=self.total_requests)
+        else:
+            random.shuffle(prompts)
+
         return prompts
 
     @staticmethod

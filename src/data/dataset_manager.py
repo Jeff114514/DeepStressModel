@@ -7,6 +7,7 @@ from src.data.offline_dataset import decrypt_offline_package
 from src.utils.logger import setup_logger
 import os
 import json
+import csv
 
 logger = setup_logger("dataset_manager")
 
@@ -187,10 +188,59 @@ class DatasetManager:
             logger.error(f"获取离线数据集数据失败: {e}")
             return None
     
+    def _load_csv_dataset(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """从 CSV 加载数据集，支持列：prompt/input/question/instruction/messages"""
+        try:
+            if not os.path.exists(file_path):
+                logger.error(f"基准测试数据集文件不存在: {file_path}")
+                return None
+
+            with open(file_path, "r", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                rows = []
+                for row in reader:
+                    # 优先字段
+                    text = (
+                        row.get("prompt")
+                        or row.get("input")
+                        or row.get("question")
+                        or row.get("instruction")
+                    )
+                    item: Dict[str, Any] = {}
+                    if text:
+                        item["input"] = text
+
+                    messages_raw = row.get("messages")
+                    if messages_raw:
+                        try:
+                            parsed = json.loads(messages_raw)
+                            if isinstance(parsed, list):
+                                item["messages"] = parsed
+                        except Exception:
+                            logger.warning(f"messages 字段解析失败，已忽略: {messages_raw}")
+
+                    if item:
+                        rows.append(item)
+
+            if not rows:
+                logger.error("CSV 数据集为空或未找到可识别的列（prompt/input/question/instruction/messages）")
+                return None
+
+            dataset_name = os.path.splitext(os.path.basename(file_path))[0]
+            return {
+                "name": dataset_name,
+                "version": "csv-import",
+                "description": f"CSV 导入数据集: {dataset_name}",
+                "data": rows,
+            }
+        except Exception as e:
+            logger.error(f"解析 CSV 数据集失败: {e}")
+            return None
+
     def load_benchmark_dataset(self, file_path: str) -> bool:
         """
         直接加载基准测试数据集（无需解密）
-        用于跑分测试，从JSON文件直接加载标准测试数据
+        用于跑分测试，从 JSON / CSV 文件直接加载标准测试数据
         
         Args:
             file_path: 数据集文件路径
@@ -206,9 +256,13 @@ class DatasetManager:
                 logger.error(f"基准测试数据集文件不存在: {file_path}")
                 return False
             
-            # 读取数据集文件
-            with open(file_path, 'r', encoding='utf-8') as f:
-                dataset = json.load(f)
+            dataset = None
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext == ".csv":
+                dataset = self._load_csv_dataset(file_path)
+            else:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    dataset = json.load(f)
             
             # 验证数据集格式
             if not isinstance(dataset, dict) or "data" not in dataset:

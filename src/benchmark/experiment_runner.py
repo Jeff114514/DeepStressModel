@@ -12,6 +12,7 @@ from typing import List, Dict, Any
 import matplotlib
 import matplotlib.pyplot as plt
 
+from src.data.dataset_manager import dataset_manager
 from src.engine.load_tester import LoadTester
 from src.utils.config import config
 from src.utils.logger import setup_logger
@@ -68,8 +69,13 @@ async def _run_case(
     prompt_len: int,
     rounds: int,
     total_requests: int,
+    use_local_dataset: bool,
+    dataset_name: str | None,
 ) -> Dict[str, Any]:
-    prompts = _build_prompts(prompt_len, rounds, max(total_requests, concurrency))
+    prompts = None
+    if not use_local_dataset:
+        prompts = _build_prompts(prompt_len, rounds, max(total_requests, concurrency))
+
     tester = LoadTester(
         backend_name=backend,
         precision=precision,
@@ -78,6 +84,7 @@ async def _run_case(
         total_requests=total_requests,
         max_new_tokens=max_new_tokens,
         prompts_override=prompts,
+        dataset_name=dataset_name,
         stream=config.get("openai_benchmarks.defaults.stream", True),
     )
     summary, path = await tester.run()
@@ -197,6 +204,26 @@ async def main_async(args: argparse.Namespace):
     total_requests = args.requests
     qps = args.qps
     max_new_tokens = args.max_new_tokens
+    dataset_path = args.dataset_path
+    dataset_name = args.dataset_name
+
+    use_local_dataset = False
+    if dataset_path:
+        if dataset_manager.load_benchmark_dataset(dataset_path):
+            use_local_dataset = True
+            logger.info(f"已加载本地数据集文件: {dataset_path}")
+        else:
+            logger.error(f"本地数据集加载失败: {dataset_path}")
+            return
+    if dataset_name:
+        use_local_dataset = True
+        logger.info(f"将使用本地数据集: {dataset_name}")
+
+    if use_local_dataset:
+        # 使用本地数据集时，prompt_len / rounds 不再影响提示生成
+        logger.info("已启用本地数据集，prompt_len 与 rounds 参数将被忽略")
+        prompt_lens = prompt_lens[:1] or [32]
+        rounds_list = rounds_list[:1] or [1]
 
     rows: List[Dict[str, Any]] = []
     for conc in concurrency_list:
@@ -212,6 +239,8 @@ async def main_async(args: argparse.Namespace):
                     prompt_len=plen,
                     rounds=rnd,
                     total_requests=total_requests,
+                    use_local_dataset=use_local_dataset,
+                    dataset_name=dataset_name,
                 )
                 rows.append(summary)
 
@@ -232,6 +261,8 @@ def main():
     parser.add_argument("--qps", type=float, default=defaults.get("qps"))
     parser.add_argument("--requests", type=int, default=defaults.get("total_requests", 20))
     parser.add_argument("--max_new_tokens", type=int, default=defaults.get("max_new_tokens", 256))
+    parser.add_argument("--dataset_path", default=None, help="本地数据集文件路径（JSON，包含data）")
+    parser.add_argument("--dataset_name", default=None, help="已加载的数据集名称，使用本地数据集时 prompt_len/rounds 将失效")
     args = parser.parse_args()
     asyncio.run(main_async(args))
 
