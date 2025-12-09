@@ -51,6 +51,14 @@ def _build_prompts(length: int, rounds: int, count: int) -> List[str]:
     return prompts
 
 
+def _default_result_dir() -> str:
+    """获取实验输出目录，优先环境变量，默认为当前工作目录下的 benchmark_results。"""
+    base = os.environ.get("DEEPSTRESS_RESULT_DIR")
+    if not base:
+        base = os.path.join(os.getcwd(), "benchmark_results")
+    return os.path.abspath(base)
+
+
 async def _run_case(
     backend: str,
     precision: str,
@@ -207,7 +215,7 @@ async def main_async(args: argparse.Namespace):
                 )
                 rows.append(summary)
 
-    result_dir = os.path.join(os.path.expanduser("~"), ".deepstressmodel", "benchmark_results")
+    result_dir = _default_result_dir()
     csv_path = _save_summary_csv(rows, result_dir)
     _plot_compare(rows, result_dir)
     logger.info(f"实验完成，汇总文件: {csv_path}")

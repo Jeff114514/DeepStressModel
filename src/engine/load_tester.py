@@ -15,7 +15,7 @@ import matplotlib
 import psutil
 
 from src.data.dataset_manager import dataset_manager
-from src.engine.backends import get_backend_class
+from src.engine.backends import BaseOpenAIBackend, get_backend_class
 from src.engine.api_client import APIClient, APIResponse
 from src.monitor.gpu_monitor import gpu_monitor
 from src.utils.config import config
@@ -42,6 +42,14 @@ def _normalize_backend_key(name: str) -> str:
     if name in ("llama.cpp", "llamacpp"):
         return "llamacpp"
     return name
+
+
+def _default_result_dir() -> str:
+    """获取压测结果输出目录，优先使用环境变量，可落在工作目录便于挂载。"""
+    base = os.environ.get("DEEPSTRESS_RESULT_DIR")
+    if not base:
+        base = os.path.join(os.getcwd(), "benchmark_results")
+    return os.path.abspath(base)
 
 
 class GPUSampler:
@@ -198,7 +206,7 @@ class LoadTester:
         self._rate_lock = asyncio.Lock()
         self._next_slot = time.perf_counter()
         self.results: List[Dict[str, Any]] = []
-        self.result_dir = os.path.join(os.path.expanduser("~"), ".deepstressmodel", "benchmark_results")
+        self.result_dir = _default_result_dir()
         os.makedirs(self.result_dir, exist_ok=True)
 
     def _build_backend_config(self) -> Dict[str, Any]:
@@ -222,8 +230,11 @@ class LoadTester:
 
     def _create_backend(self):
         backend_cls = get_backend_class(self.backend_name)
-        options = backend_cls.from_model_config(self.backend_config)
-        return backend_cls(options)
+        backend_or_options = backend_cls.from_model_config(self.backend_config)
+        # from_model_config 目前返回的就是实例，需兼容旧逻辑
+        if isinstance(backend_or_options, BaseOpenAIBackend):
+            return backend_or_options
+        return backend_cls(backend_or_options)
 
     def _prepare_prompts(self) -> List[str]:
         prompts: List[str] = []
