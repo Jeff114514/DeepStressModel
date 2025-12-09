@@ -22,7 +22,8 @@ class TestRecordsManager:
             test_task_id: str,
             model_config: dict,
             selected_datasets: dict,
-            total_concurrency: int):
+            total_concurrency: int,
+            dataset_concurrency_map: dict | None = None):
         """初始化测试记录
         
         Args:
@@ -30,6 +31,7 @@ class TestRecordsManager:
             model_config: 模型配置
             selected_datasets: 选中的数据集，格式为 {dataset_name: (prompts, weight)}
             total_concurrency: 总并发数
+            dataset_concurrency_map: 预分配好的并发映射
         
         Returns:
             dict: 初始化的测试记录
@@ -69,9 +71,12 @@ class TestRecordsManager:
             # 初始化每个数据集的统计信息
             total_tasks = 0  # 重置总任务数
             for dataset_name, (prompts, weight) in selected_datasets.items():
-                # 计算每个数据集的实际并发数
-                dataset_concurrency = max(
-                    1, int((weight / total_weight) * total_concurrency))
+                # 计算每个数据集的实际并发数（优先使用传入映射）
+                if dataset_concurrency_map and dataset_name in dataset_concurrency_map:
+                    dataset_concurrency = max(0, dataset_concurrency_map[dataset_name])
+                else:
+                    dataset_concurrency = max(
+                        1, int((weight / total_weight) * total_concurrency))
                 # 实际任务数取并发与可用prompt数量的较小值
                 dataset_tasks = min(len(prompts), dataset_concurrency)
                 total_tasks += dataset_tasks

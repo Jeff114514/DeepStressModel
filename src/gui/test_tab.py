@@ -545,26 +545,33 @@ class TestTab(QWidget):
             total_concurrency = self.concurrency_spinbox.value()
             logger.info(f"设置的总并发数: {total_concurrency}")
             
-            # 初始化测试记录
+            # 计算并发分配（按权重 + 四舍五入补偿，确保总和匹配）
+            dataset_concurrency_map = self._allocate_concurrency(
+                selected_datasets, total_concurrency)
+            if not dataset_concurrency_map:
+                QMessageBox.critical(self, "错误", "并发分配失败，请检查数据集与权重配置")
+                return
+            actual_total_concurrency = sum(dataset_concurrency_map.values())
+            logger.info(f"并发分配结果: {dataset_concurrency_map}, 实际总并发={actual_total_concurrency}")
+            if actual_total_concurrency < total_concurrency:
+                logger.warning(f"因可用prompt受限，实际总并发 {actual_total_concurrency} 低于设定值 {total_concurrency}")
+            
+            # 初始化测试记录（使用最终并发分配）
             records = self.records_manager.init_test_records(
-                test_task_id, model_config, selected_datasets, total_concurrency)
+                test_task_id, model_config, selected_datasets,
+                actual_total_concurrency, dataset_concurrency_map)
             
-            # 计算总权重
-            total_weight = sum(
-                weight for _,
-                weight in selected_datasets.values())
-            logger.info(f"总权重: {total_weight}")
-            
-            # 根据权重分配并发数并创建测试任务
+            # 创建测试任务 - 使用分配好的并发
             tasks = []
             for dataset_name, (prompts, weight) in selected_datasets.items():
-                # 计算分配的并发数
-                dataset_concurrency = max(
-                    1, int((weight / total_weight) * total_concurrency))
-                logger.info(
-                    f"数据集 {dataset_name} 配置: 权重={weight}, 并发数={dataset_concurrency}")
+                if dataset_name not in dataset_concurrency_map:
+                    logger.warning(f"数据集 {dataset_name} 没有分配到并发，跳过")
+                    continue
+                dataset_concurrency = dataset_concurrency_map[dataset_name]
+                if dataset_concurrency <= 0:
+                    logger.warning(f"数据集 {dataset_name} 并发为0，跳过")
+                    continue
                 
-                # 创建测试任务 - 使用并发数作为任务数
                 task = TestTask(
                     dataset_name=dataset_name,
                     prompts=prompts,
@@ -573,7 +580,7 @@ class TestTab(QWidget):
                 )
                 tasks.append(task)
                 logger.info(
-                    f"创建测试任务: dataset={dataset_name}, 并发数={dataset_concurrency}")
+                    f"创建测试任务: dataset={dataset_name}, 并发数={dataset_concurrency}, prompts={len(prompts)}")
             
             # 更新UI状态
             self.start_btn.setEnabled(False)
@@ -605,6 +612,83 @@ class TestTab(QWidget):
             logger.error(f"启动测试失败: {e}", exc_info=True)
             QMessageBox.critical(self, "错误", f"启动测试失败: {e}")
             self._clear_test_state()
+
+    def _allocate_concurrency(self, selected_datasets: dict, total_concurrency: int) -> dict:
+        """按权重分配并发，使用最大余数法，确保总和匹配并受prompt数量约束。"""
+        if total_concurrency <= 0 or not selected_datasets:
+            return {}
+        
+        # 过滤无可用prompt的数据集
+        filtered = {
+            name: (prompts, weight)
+            for name, (prompts, weight) in selected_datasets.items()
+            if prompts
+        }
+        if not filtered:
+            return {}
+        
+        total_weight = sum(weight for _, weight in filtered.values()) or len(filtered)
+        
+        # 初步分配（向下取整，至少为1）
+        alloc = {}
+        remainders = []
+        for name, (prompts, weight) in filtered.items():
+            raw = (weight / total_weight) * total_concurrency
+            base = max(1, int(raw))
+            alloc[name] = base
+            remainders.append((raw - int(raw), name))
+        
+        current = sum(alloc.values())
+        
+        # 如果分配不足，按余数补齐
+        if current < total_concurrency:
+            remaining = total_concurrency - current
+            remainders.sort(reverse=True)
+            idx = 0
+            while remaining > 0 and remainders:
+                _, name = remainders[idx % len(remainders)]
+                alloc[name] += 1
+                remaining -= 1
+                idx += 1
+        # 如果分配超出，按当前分配从大到小回退
+        elif current > total_concurrency:
+            excess = current - total_concurrency
+            for name, value in sorted(alloc.items(), key=lambda x: x[1], reverse=True):
+                if excess <= 0:
+                    break
+                if value > 1:
+                    cut = min(value - 1, excess)
+                    alloc[name] -= cut
+                    excess -= cut
+        
+        # 受可用prompt数量约束
+        capacity = {name: len(prompts) for name, (prompts, _) in filtered.items()}
+        for name in list(alloc.keys()):
+            alloc[name] = min(alloc[name], capacity.get(name, 0))
+            if alloc[name] <= 0:
+                alloc.pop(name, None)
+        
+        # 如果因容量收紧导致总并发降低，尝试再分配剩余并发给有余量的数据集
+        deficit = total_concurrency - sum(alloc.values())
+        if deficit > 0:
+            candidates = [
+                (capacity[name] - alloc[name], name)
+                for name in alloc.keys()
+                if capacity.get(name, 0) > alloc[name]
+            ]
+            candidates.sort(reverse=True)
+            idx = 0
+            while deficit > 0 and candidates:
+                leftover, name = candidates[idx % len(candidates)]
+                if leftover <= 0:
+                    break
+                alloc[name] += 1
+                leftover -= 1
+                deficit -= 1
+                candidates[idx % len(candidates)] = (leftover, name)
+                idx += 1
+        
+        return alloc
     
     def stop_test(self):
         """停止测试"""

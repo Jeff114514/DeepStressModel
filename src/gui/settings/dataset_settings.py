@@ -1,6 +1,7 @@
 """
 数据集设置界面模块
 """
+import re
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QSpinBox, QPushButton,
@@ -14,6 +15,33 @@ from src.data.test_datasets import DATASETS  # 导入内置数据集
 from src.gui.i18n.language_manager import LanguageManager
 
 logger = setup_logger("dataset_settings")
+
+
+def parse_prompts_text(raw_text: str) -> list[str]:
+    """将编辑框中的文本解析为提示列表，支持多行对话。
+
+    优先使用分隔符（空行或单独的 '---' 行）区分不同对话；
+    若未找到分隔符，则回退到按行拆分的旧行为。
+    """
+    normalized = (raw_text or "").replace("\r\n", "\n")
+    # 使用空行或独立的 --- 作为分隔符，保留单条内的换行
+    blocks = [
+        block.strip()
+        for block in re.split(r"\n\s*---\s*\n|\n{2,}", normalized)
+        if block.strip()
+    ]
+    if len(blocks) > 1:
+        return blocks
+    # 回退兼容旧逻辑：按行拆分
+    return [line.strip() for line in normalized.split("\n") if line.strip()]
+
+
+def serialize_prompts_for_editor(prompts: list[str]) -> str:
+    """将提示列表序列化为编辑器展示文本，使用 --- 分隔，便于多行显示。"""
+    if not prompts:
+        return ""
+    return "\n\n---\n\n".join(prompts)
+
 
 class DatasetEditDialog(QDialog):
     """数据集编辑对话框"""
@@ -50,7 +78,10 @@ class DatasetEditDialog(QDialog):
         
         # 提示词列表
         self.prompts_edit = QTextEdit()
-        self.prompts_edit.setPlaceholderText(self.tr('example_prompts'))
+        self.prompts_edit.setPlaceholderText(
+            f"{self.tr('example_prompts')}\n"
+            "使用空行或单独一行 '---' 分隔不同对话，单条对话可包含多行内容"
+        )
         form_layout.addRow(self.tr('prompt_count') + ":", self.prompts_edit)
         
         layout.addLayout(form_layout)
@@ -72,11 +103,13 @@ class DatasetEditDialog(QDialog):
         """加载数据集数据"""
         self.name_edit.setText(self.dataset_data["name"])
         self.category_combo.setCurrentText(self.dataset_data.get("category", "其他"))
-        self.prompts_edit.setPlainText("\n".join(self.dataset_data["prompts"]))
+        self.prompts_edit.setPlainText(
+            serialize_prompts_for_editor(self.dataset_data.get("prompts", []))
+        )
     
     def get_dataset_data(self) -> dict:
         """获取数据集数据"""
-        prompts = [p.strip() for p in self.prompts_edit.toPlainText().split("\n") if p.strip()]
+        prompts = parse_prompts_text(self.prompts_edit.toPlainText())
         return {
             "name": self.name_edit.text(),
             "category": self.category_combo.currentText(),
@@ -366,7 +399,8 @@ class DatasetSettingsWidget(QWidget):
             
             if file_path:
                 with open(file_path, "r", encoding="utf-8") as f:
-                    prompts = [line.strip() for line in f if line.strip()]
+                    file_content = f.read()
+                    prompts = parse_prompts_text(file_content)
                 
                 if prompts:
                     dataset_name = file_path.split("/")[-1].split(".")[0]
@@ -403,7 +437,7 @@ class DatasetSettingsWidget(QWidget):
                 
                 if file_path:
                     with open(file_path, "w", encoding="utf-8") as f:
-                        f.write("\n".join(dataset["prompts"]))
+                        f.write(serialize_prompts_for_editor(dataset.get("prompts", [])))
                     logger.info(f"导出数据集成功: {dataset['name']}")
         except Exception as e:
             logger.error(f"导出数据集失败: {e}")
