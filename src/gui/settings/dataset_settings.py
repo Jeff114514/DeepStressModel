@@ -20,20 +20,24 @@ logger = setup_logger("dataset_settings")
 def parse_prompts_text(raw_text: str) -> list[str]:
     """将编辑框中的文本解析为提示列表，支持多行对话。
 
-    优先使用分隔符（空行或单独的 '---' 行）区分不同对话；
-    若未找到分隔符，则回退到按行拆分的旧行为。
+    仅将独立的 '---' 行视为分隔符，空行不会再拆分为多条。
+    若未找到分隔符，则把全部文本视为单条提示，保留内部换行。
     """
-    normalized = (raw_text or "").replace("\r\n", "\n")
-    # 使用空行或独立的 --- 作为分隔符，保留单条内的换行
+    normalized = (raw_text or "").replace("\r\n", "\n").strip()
+    if not normalized:
+        return []
+
+    # 仅使用显式的 --- 分隔符拆分，避免空行被误判为新样本
     blocks = [
         block.strip()
-        for block in re.split(r"\n\s*---\s*\n|\n{2,}", normalized)
+        for block in re.split(r"\n\s*---\s*\n", normalized)
         if block.strip()
     ]
     if len(blocks) > 1:
         return blocks
-    # 回退兼容旧逻辑：按行拆分
-    return [line.strip() for line in normalized.split("\n") if line.strip()]
+
+    # 没有分隔符时，作为单条提示返回
+    return [normalized]
 
 
 def serialize_prompts_for_editor(prompts: list[str]) -> str:
@@ -80,7 +84,7 @@ class DatasetEditDialog(QDialog):
         self.prompts_edit = QTextEdit()
         self.prompts_edit.setPlaceholderText(
             f"{self.tr('example_prompts')}\n"
-            "使用空行或单独一行 '---' 分隔不同对话，单条对话可包含多行内容"
+            "使用单独一行 '---' 分隔不同对话，单条对话可包含多行内容，空行不会被拆分"
         )
         form_layout.addRow(self.tr('prompt_count') + ":", self.prompts_edit)
         
