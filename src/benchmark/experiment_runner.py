@@ -52,13 +52,19 @@ def _build_prompts(length: int, rounds: int, count: int) -> List[str]:
     return prompts
 
 
-def _default_result_dir() -> str:
+def _default_result_dir(backend: str) -> str:
     """获取实验输出目录，优先环境变量，默认为当前工作目录下的 benchmark_results。"""
     base = os.environ.get("DEEPSTRESS_RESULT_DIR")
-    if not base:
+    if base:
+        base = os.path.abspath(base)
+    else:
         base = os.path.join(os.getcwd(), "benchmark_results")
+    # 若环境变量已包含 backend 名称，则避免重复追加
+    if os.path.basename(base).lower() != backend.lower():
+        base = os.path.join(base, backend)
+    base = os.path.join(base, datetime.now().strftime("%Y%m%d%H%M%S"))
+    print(f"实验输出目录: {base}")
     return os.path.abspath(base)
-
 
 async def _run_case(
     backend: str,
@@ -71,6 +77,7 @@ async def _run_case(
     total_requests: int,
     use_local_dataset: bool,
     dataset_name: str | None,
+    save_result: bool = True,
 ) -> Dict[str, Any]:
     prompts = None
     if not use_local_dataset:
@@ -87,8 +94,9 @@ async def _run_case(
         dataset_name=dataset_name,
         stream=config.get("openai_benchmarks.defaults.stream", True),
     )
-    summary, path = await tester.run()
-    summary["result_path"] = path
+    summary, path = await tester.run(save_result=save_result)
+    if save_result:
+        summary["result_path"] = path
     summary["prompt_len"] = prompt_len
     summary["rounds"] = rounds
     return summary
@@ -112,6 +120,7 @@ def _save_summary_csv(rows: List[Dict[str, Any]], out_dir: str) -> str:
         "prompt_len",
         "rounds",
         "throughput_tokens_per_s",
+        "throughput_tokens_per_s_per_concurrency",
         "throughput_input_tokens_per_s",
         "throughput_output_tokens_per_s",
         "first_token_avg",
@@ -140,6 +149,7 @@ def _save_summary_csv(rows: List[Dict[str, Any]], out_dir: str) -> str:
                     "prompt_len": r.get("prompt_len"),
                     "rounds": r.get("rounds"),
                     "throughput_tokens_per_s": r.get("throughput_tokens_per_s"),
+                        "throughput_tokens_per_s_per_concurrency": r.get("throughput_tokens_per_s_per_concurrency"),
                     "throughput_input_tokens_per_s": r.get("throughput_input_tokens_per_s"),
                     "throughput_output_tokens_per_s": r.get("throughput_output_tokens_per_s"),
                     "first_token_avg": r.get("first_token_avg"),
@@ -219,11 +229,38 @@ async def main_async(args: argparse.Namespace):
         use_local_dataset = True
         logger.info(f"将使用本地数据集: {dataset_name}")
 
+    # 统一结果输出目录，确保 LoadTester 与汇总使用同一位置
+    target_result_dir = _default_result_dir(backend)
+    prev_result_env = os.environ.get("DEEPSTRESS_RESULT_DIR")
+    os.environ["DEEPSTRESS_RESULT_DIR"] = target_result_dir
+
     if use_local_dataset:
         # 使用本地数据集时，prompt_len / rounds 不再影响提示生成
         logger.info("已启用本地数据集，prompt_len 与 rounds 参数将被忽略")
         prompt_lens = prompt_lens[:1] or [32]
         rounds_list = rounds_list[:1] or [1]
+
+    # 预热阶段：固定并发4、请求16，避免首批冷启动影响正式对比
+    warmup_prompt_len = prompt_lens[0] if prompt_lens else 32
+    warmup_rounds = rounds_list[0] if rounds_list else 1
+    logger.info("开始 warmup：并发=4，请求=16")
+    try:
+        await _run_case(
+            backend=backend,
+            precision=precision,
+            concurrency=4,
+            qps=qps,
+            max_new_tokens=max_new_tokens,
+            prompt_len=warmup_prompt_len,
+            rounds=warmup_rounds,
+            total_requests=16,
+            use_local_dataset=use_local_dataset,
+            dataset_name=dataset_name,
+            save_result=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("warmup 失败，但将继续正式实验: %s", exc)
+    logger.info("warmup 完成，开始正式实验")
 
     rows: List[Dict[str, Any]] = []
     for conc in concurrency_list:
@@ -244,10 +281,16 @@ async def main_async(args: argparse.Namespace):
                 )
                 rows.append(summary)
 
-    result_dir = _default_result_dir()
+    result_dir = _default_result_dir(backend)
     csv_path = _save_summary_csv(rows, result_dir)
     _plot_compare(rows, result_dir)
     logger.info(f"实验完成，汇总文件: {csv_path}")
+
+    # 恢复环境变量，避免影响后续进程
+    if prev_result_env is None:
+        os.environ.pop("DEEPSTRESS_RESULT_DIR", None)
+    else:
+        os.environ["DEEPSTRESS_RESULT_DIR"] = prev_result_env
 
 
 def main():

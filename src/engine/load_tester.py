@@ -366,6 +366,10 @@ class LoadTester:
         total_input_tokens = sum(input_tokens)
         total_output_tokens = sum(output_tokens)
         total_all_tokens = total_input_tokens + total_output_tokens
+        throughput_tokens_per_s = (total_all_tokens / wall) if total_all_tokens else 0.0
+        throughput_tokens_per_s_per_conc = (
+            throughput_tokens_per_s / self.concurrency if self.concurrency else 0.0
+        )
 
         summary = {
             "backend": self.backend_name,
@@ -390,7 +394,8 @@ class LoadTester:
             "output_tokens_total": total_output_tokens,
             "throughput_input_tokens_per_s": (total_input_tokens / wall) if total_input_tokens else 0.0,
             "throughput_output_tokens_per_s": (total_output_tokens / wall) if total_output_tokens else 0.0,
-            "throughput_tokens_per_s": (total_all_tokens / wall) if total_all_tokens else 0.0,
+            "throughput_tokens_per_s": throughput_tokens_per_s,
+            "throughput_tokens_per_s_per_concurrency": throughput_tokens_per_s_per_conc,
             "qps_observed": (len(self.results) / wall) if self.results else 0.0,
             "first_token_p50": _percentile(first_tokens, 50) if first_tokens else 0.0,
             "gpu": gpu_summary,
@@ -430,6 +435,7 @@ class LoadTester:
             "output_tokens",
             "tokens",
             "generation_speed",
+            "throughput_tokens_per_s_per_concurrency",
             "error",
             "start_ts",
             "end_ts",
@@ -616,7 +622,7 @@ class LoadTester:
             logger.warning(f"生成图表失败: {exc}")
             return None
 
-    async def run(self) -> Tuple[Dict[str, Any], str]:
+    async def run(self, save_result: bool = True) -> Tuple[Dict[str, Any], Optional[str]]:
         prompts = self._prepare_prompts()
         queue: asyncio.Queue = asyncio.Queue()
 
@@ -662,7 +668,9 @@ class LoadTester:
             start_wall,
             end_wall,
         )
-        path = self._save_result(summary, start_ts, end_ts, start_wall, end_wall)
+        path = None
+        if save_result:
+            path = self._save_result(summary, start_ts, end_ts, start_wall, end_wall)
         return summary, path
 
 
