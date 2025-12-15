@@ -28,7 +28,7 @@ def _parse_int_list(raw: str, default: List[int]) -> List[int]:
     try:
         return [int(x.strip()) for x in raw.split(",") if x.strip()]
     except ValueError:
-        logger.warning(f"无法解析列表 {raw}，使用默认值 {default}")
+        logger.warning("无法解析列表 %s，使用默认值 %s", raw, default)
         return default
 
 
@@ -182,7 +182,7 @@ def _save_summary_csv(rows: List[Dict[str, Any]], out_dir: str) -> str:
                     "result_path": r.get("result_path"),
                 }
             )
-    logger.info(f"实验汇总 CSV 已生成: {filename}")
+    logger.info("实验汇总 CSV 已生成: %s", filename)
     return filename
 
 
@@ -220,7 +220,7 @@ def _plot_compare(rows: List[Dict[str, Any]], out_dir: str):
     plt.savefig(path3)
     plt.close()
 
-    logger.info(f"对比图已生成: {path1}, {path2}, {path3}")
+    logger.info("对比图已生成: %s, %s, %s", path1, path2, path3)
 
 
 async def main_async(args: argparse.Namespace):
@@ -239,13 +239,13 @@ async def main_async(args: argparse.Namespace):
     if dataset_path:
         if dataset_manager.load_benchmark_dataset(dataset_path):
             use_local_dataset = True
-            logger.info(f"已加载本地数据集文件: {dataset_path}")
+            logger.info("已加载本地数据集文件: %s", dataset_path)
         else:
-            logger.error(f"本地数据集加载失败: {dataset_path}")
+            logger.error("本地数据集加载失败: %s", dataset_path)
             return
     if dataset_name:
         use_local_dataset = True
-        logger.info(f"将使用本地数据集: {dataset_name}")
+        logger.info("将使用本地数据集: %s", dataset_name)
 
     # 统一结果输出目录，确保 LoadTester 与汇总使用同一位置
     target_result_dir = _default_result_dir(backend)
@@ -284,7 +284,7 @@ async def main_async(args: argparse.Namespace):
     for conc in concurrency_list:
         for plen in prompt_lens:
             for rnd in rounds_list:
-                logger.info(f"运行实验: 并发={conc}, prompt_len={plen}, rounds={rnd}")
+                logger.info("运行实验: 并发=%s, prompt_len=%s, rounds=%s", conc, plen, rnd)
                 summary = await _run_case(
                     backend=backend,
                     precision=precision,
@@ -303,7 +303,7 @@ async def main_async(args: argparse.Namespace):
     result_dir = target_result_dir
     csv_path = _save_summary_csv(rows, result_dir)
     _plot_compare(rows, result_dir)
-    logger.info(f"实验完成，汇总文件: {csv_path}")
+    logger.info("实验完成，汇总文件: %s", csv_path)
 
     # 恢复环境变量，避免影响后续进程
     if prev_result_env is None:
