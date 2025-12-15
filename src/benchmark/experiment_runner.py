@@ -61,9 +61,9 @@ def _default_result_dir(backend: str) -> str:
     """
     获取实验输出目录：
     1) 若设置了 DEEPSTRESS_RESULT_DIR，则尊重用户配置；
-       - 若末级目录名已是时间戳，认为用户指定了完整路径，直接返回。
-       - 若末级目录名与 backend 不同，则追加 backend。
-       - 若末级目录名不是时间戳，再追加一个时间戳层。
+        - 若末级目录名已是时间戳，认为用户指定了完整路径，直接返回。
+        - 若末级目录名与 backend 不同，则追加 backend。
+        - 若末级目录名不是时间戳，再追加一个时间戳层。
     2) 否则默认在 CWD/benchmark_results/<backend>/<timestamp> 下。
     """
     base = os.environ.get("DEEPSTRESS_RESULT_DIR")
@@ -95,7 +95,7 @@ async def _run_case(
     total_requests: int,
     use_local_dataset: bool,
     dataset_name: str | None,
-    save_result: bool = True,
+    save_result: bool = True
 ) -> Dict[str, Any]:
     prompts = None
     if not use_local_dataset:
