@@ -224,11 +224,12 @@ class APIClient:
     
     async def generate(self, prompt: str) -> APIResponse:
         """生成响应"""
+        # 将本地分词耗时也计入首 token 延迟
         start_time = time.time()
+        prompt_tokens = token_counter.count_tokens(prompt, self.model)
         stream_stats = StreamStats(self.model)  # 传入模型名称
         full_response = []
         first_token_latency = None
-        prompt_tokens = token_counter.count_tokens(prompt, self.model)
         
         # 根据配置决定是否使用流式输出
         use_stream = self._force_stream

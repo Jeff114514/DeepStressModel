@@ -189,38 +189,55 @@ class DatasetManager:
             return None
     
     def _load_csv_dataset(self, file_path: str) -> Optional[Dict[str, Any]]:
-        """从 CSV 加载数据集，支持列：prompt/input/question/instruction/messages"""
+        """从 CSV 加载数据集，支持列：prompt/input/question/instruction/messages，带编码回退。"""
+        encodings = ["utf-8-sig", "utf-8", "gbk", "ansi"]
+
+        def _open_csv(enc: str):
+            with open(file_path, "r", encoding=enc, errors="strict") as f:
+                return list(csv.DictReader(f))
+
         try:
             if not os.path.exists(file_path):
                 logger.error(f"基准测试数据集文件不存在: {file_path}")
                 return None
 
-            with open(file_path, "r", encoding="utf-8-sig") as f:
-                reader = csv.DictReader(f)
-                rows = []
-                for row in reader:
-                    # 优先字段
-                    text = (
-                        row.get("prompt")
-                        or row.get("input")
-                        or row.get("question")
-                        or row.get("instruction")
-                    )
-                    item: Dict[str, Any] = {}
-                    if text:
-                        item["input"] = text
+            reader_rows = None
+            last_err = None
+            for enc in encodings:
+                try:
+                    reader_rows = _open_csv(enc)
+                    logger.info(f"CSV 读取成功，编码: {enc}")
+                    break
+                except Exception as e:  # noqa: BLE001
+                    last_err = e
+                    logger.warning(f"使用编码 {enc} 解析 CSV 失败，尝试下一编码: {e}")
+            if reader_rows is None:
+                logger.error(f"CSV 解析失败，已尝试编码 {encodings}，最后错误: {last_err}")
+                return None
 
-                    messages_raw = row.get("messages")
-                    if messages_raw:
-                        try:
-                            parsed = json.loads(messages_raw)
-                            if isinstance(parsed, list):
-                                item["messages"] = parsed
-                        except Exception:
-                            logger.warning(f"messages 字段解析失败，已忽略: {messages_raw}")
+            rows = []
+            for row in reader_rows:
+                text = (
+                    row.get("prompt")
+                    or row.get("input")
+                    or row.get("question")
+                    or row.get("instruction")
+                )
+                item: Dict[str, Any] = {}
+                if text:
+                    item["input"] = text
 
-                    if item:
-                        rows.append(item)
+                messages_raw = row.get("messages")
+                if messages_raw:
+                    try:
+                        parsed = json.loads(messages_raw)
+                        if isinstance(parsed, list):
+                            item["messages"] = parsed
+                    except Exception:
+                        logger.warning(f"messages 字段解析失败，已忽略: {messages_raw}")
+
+                if item:
+                    rows.append(item)
 
             if not rows:
                 logger.error("CSV 数据集为空或未找到可识别的列（prompt/input/question/instruction/messages）")
