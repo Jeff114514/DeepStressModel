@@ -495,7 +495,10 @@ class GPUMonitorManager:
                 return None
             return self.monitor.get_stats()
         except Exception as e:
-            logger.error(f"获取GPU统计数据失败: {e}")
+            # 只在第一次错误时记录日志，避免重复报错
+            if not hasattr(self, '_get_stats_error_logged'):
+                logger.warning("获取GPU统计数据失败: %s (后续错误将静默处理)", e)
+                self._get_stats_error_logged = True
             return None
 
 # 创建全局GPU监控管理器实例，但不自动初始化
@@ -511,6 +514,7 @@ class LocalGPUMonitor:
     def __init__(self):
         self._last_net = None
         self._last_time = None
+        self._get_stats_error_logged = False  # 标记是否已经记录过错误
         # 预检 nvidia-smi
         if not self._has_nvidia_smi():
             raise RuntimeError("未找到 nvidia-smi，无法启用本地GPU监控")
@@ -594,7 +598,13 @@ class LocalGPUMonitor:
                 total_memory=int(mem.total / (1024**3)),
             )
             # 本地模式无需 db 存储，保持接口一致即可
+            # 如果之前有错误但现在成功了，重置错误标记
+            if self._get_stats_error_logged:
+                self._get_stats_error_logged = False
             return stats
         except Exception as exc:  # noqa: BLE001
-            logger.error(f"获取本地GPU状态错误: {exc}")
+            # 只在第一次错误时记录日志，避免重复报错
+            if not self._get_stats_error_logged:
+                logger.warning("获取本地GPU状态错误: %s (后续错误将静默处理)", exc)
+                self._get_stats_error_logged = True
             return None

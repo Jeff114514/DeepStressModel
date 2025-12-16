@@ -61,6 +61,7 @@ class GPUSampler:
         self.samples: List[Dict[str, Any]] = []
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._error_logged = False  # 标记是否已经记录过错误
 
     async def _sample_loop(self):
         while self._running:
@@ -75,8 +76,14 @@ class GPUSampler:
                             "gpu_memory_total": stats.memory_total,
                         }
                     )
+                    # 如果之前有错误但现在成功了，重置错误标记
+                    if self._error_logged:
+                        self._error_logged = False
             except Exception as exc:  # noqa: BLE001
-                logger.warning(f"GPU 采样失败: {exc}")
+                # 只在第一次错误时记录日志
+                if not self._error_logged:
+                    logger.warning("GPU 采样失败: %s (后续错误将静默处理)", exc)
+                    self._error_logged = True
             await asyncio.sleep(self.interval)
 
     def start(self):
