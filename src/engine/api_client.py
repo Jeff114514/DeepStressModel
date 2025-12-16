@@ -171,7 +171,13 @@ class APIClient:
         # 创建异步HTTP会话，禁用连接并发限制
         default_headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         default_headers.update(self.extra_headers)
-        connector = aiohttp.TCPConnector(limit=0, limit_per_host=0)
+        # 改进连接器配置，增加连接池大小和keepalive时间
+        connector = aiohttp.TCPConnector(
+            limit=0,  # 无限制总连接数
+            limit_per_host=0,  # 无限制每个主机连接数
+            keepalive_timeout=30,  # keepalive超时时间
+            enable_cleanup_closed=True  # 启用清理已关闭的连接
+        )
         self.session = aiohttp.ClientSession(headers=default_headers, connector=connector)
         logger.info(f"初始化 API 客户端: URL={api_url}, model={model}, connect_timeout={self.connect_timeout}, max_retries={self.max_retries}")
     
@@ -238,20 +244,28 @@ class APIClient:
         
         for attempt in range(self.max_retries):
             try:
-                async with self.session.post(
-                    f"{self.api_url}{self.chat_path}",  # 允许自定义路径
-                    json={
-                        "model": self.model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "stream": use_stream,  # 根据配置决定是否启用流式输出
-                        **self.model_params  # 使用model_params代替直接指定参数
-                    },
-                    timeout=aiohttp.ClientTimeout(
+                request_url = f"{self.api_url}{self.chat_path}"
+                request_data = {
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": use_stream,  # 根据配置决定是否启用流式输出
+                    **self.model_params  # 使用model_params代替直接指定参数
+                }
+                logger.debug(f"发送请求到: {request_url}, 模型: {self.model}, 数据: {request_data}")
+                # 如果 connect_timeout 为 None，则关闭所有超时限制
+                if self.connect_timeout is None:
+                    timeout_config = None  # 完全关闭超时
+                else:
+                    timeout_config = aiohttp.ClientTimeout(
                         connect=self.connect_timeout,
                         sock_connect=self.connect_timeout,
                         sock_read=None,  # 不限制读取超时
                         total=None  # 不限制总体超时
                     )
+                async with self.session.post(
+                    request_url,  # 允许自定义路径
+                    json=request_data,
+                    timeout=timeout_config
                 ) as response:
                     if response.status == 200:
                         try:
@@ -321,6 +335,7 @@ class APIClient:
                     else:
                         error_text = await response.text()
                         logger.error(f"API请求失败 (尝试 {attempt + 1}/{self.max_retries}): {response.status} - {error_text}")
+                        logger.error(f"请求URL: {self.api_url}{self.chat_path}, 模型: {self.model}")
                         if attempt == self.max_retries - 1:
                             return APIResponse(
                                 success=False,
@@ -344,21 +359,46 @@ class APIClient:
                         end_time=time.time()
                     )
             
-            except Exception as e:
-                logger.error(f"API请求异常 (尝试 {attempt + 1}/{self.max_retries}): {e}")
-                if attempt == self.max_retries - 1:
-                    return APIResponse(
-                        success=False,
-                        error_msg=str(e),
-                                input_tokens=prompt_tokens,
-                        duration=time.time() - start_time,
-                        start_time=start_time,
-                        end_time=time.time()
-                    )
+            except (aiohttp.ServerDisconnectedError, aiohttp.ClientConnectionError, ConnectionError, OSError) as e:
+                error_type = type(e).__name__
+                error_msg_str = str(e)
+                logger.error("API连接错误 (尝试 %d/%d): %s - %s", attempt + 1, self.max_retries, error_type, error_msg_str)
+                logger.error("请求URL: %s%s, 模型: %s", self.api_url, self.chat_path, self.model)
+                # 对于连接错误，增加重试等待时间
+                if attempt < self.max_retries - 1:
+                    wait_time = 2 * (attempt + 1)  # 递增等待时间：2s, 4s, 6s...
+                    logger.info("等待 %d 秒后重试...", wait_time)
+                    await asyncio.sleep(wait_time)
+                    continue  # 继续重试循环
+                # 最后一次尝试失败
+                return APIResponse(
+                    success=False,
+                    error_msg=f"连接错误 ({error_type}): {error_msg_str}",
+                    input_tokens=prompt_tokens,
+                    duration=time.time() - start_time,
+                    start_time=start_time,
+                    end_time=time.time()
+                )
             
-            # 重试前等待
-            if attempt < self.max_retries - 1:
-                await asyncio.sleep(1 * (attempt + 1))
+            except Exception as e:
+                error_type = type(e).__name__
+                error_msg_str = str(e)
+                logger.error("API请求异常 (尝试 %d/%d): %s - %s", attempt + 1, self.max_retries, error_type, error_msg_str)
+                logger.error("请求URL: %s%s, 模型: %s", self.api_url, self.chat_path, self.model)
+                if attempt < self.max_retries - 1:
+                    wait_time = 1 * (attempt + 1)  # 通用异常等待时间：1s, 2s, 3s...
+                    logger.info("等待 %d 秒后重试...", wait_time)
+                    await asyncio.sleep(wait_time)
+                    continue  # 继续重试循环
+                # 最后一次尝试失败
+                return APIResponse(
+                    success=False,
+                    error_msg=f"{error_type}: {error_msg_str}",
+                    input_tokens=prompt_tokens,
+                    duration=time.time() - start_time,
+                    start_time=start_time,
+                    end_time=time.time()
+                )
         
         return APIResponse(
             success=False,

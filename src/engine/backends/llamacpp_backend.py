@@ -1,19 +1,13 @@
 """
 Llama.cpp 的 OpenAI 兼容后端
+直接使用 vLLM 相同的后端实现，仅保留名称差异
 """
-from src.engine.backends.openai_backend import BaseOpenAIBackend, BackendOptions
+from src.engine.backends.vllm_backend import VLLMBackend
 
 
-class LlamaCppBackend(BaseOpenAIBackend):
+class LlamaCppBackend(VLLMBackend):
+    """Llama.cpp 后端，使用与 vLLM 相同的实现"""
     backend_name = "llama.cpp"
-    # llama.cpp OpenAI server 默认路径
-    default_chat_path = "/chat/completions"
-
-    def __init__(self, options: BackendOptions):
-        # llama.cpp 多数使用本地GGUF，默认为非流式
-        if options.precision is None:
-            options.precision = options.extra_body_params.get("precision", "gguf")
-        super().__init__(options)
 
 
 

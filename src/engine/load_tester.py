@@ -626,8 +626,13 @@ class LoadTester:
         prompts = self._prepare_prompts()
         queue: asyncio.Queue = asyncio.Queue()
 
+        # 对于 llamacpp 后端，使用 369 秒超时
+        timeout = self.timeout or config.get("test.timeout", 60)
+        if self.backend_name.lower() in ("llama.cpp", "llamacpp"):
+            timeout = 369
+
         self.client = self.backend.create_client(
-            timeout=self.timeout or config.get("test.timeout", 60),
+            timeout=timeout,
             retry_count=self.retry_count or config.get("test.retry_count", 1),
             max_tokens=self.max_new_tokens,
         )

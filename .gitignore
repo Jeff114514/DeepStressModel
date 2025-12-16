@@ -41,8 +41,14 @@ Thumbs.db
 
 # 项目特定
 # 只忽略根目录下的 data 目录
-/data/
-/data/**/*
+/data/benchmark
+/data/logs
+/data/benchmark/**/*
+/data/logs/**/*
+/data/deepsstress.db
+/data/test.csv
+/benchmark_results/
+/benchmark_results/**/*
 
 # 忽略所有日志和数据库文件，无论在哪个目录
 **/*.log

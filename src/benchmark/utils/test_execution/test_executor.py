@@ -67,6 +67,15 @@ async def execute_test(test_data: List[Dict[str, Any]], config: Dict[str, Any]) 
     
     # 获取API请求超时设置，如果未设置则为None（无超时限制）
     api_timeout = config.get("api_timeout", None)
+    
+    # 对于 llamacpp 后端，使用 369 秒超时
+    model_config = config.get("model_config", {})
+    backend_name = model_config.get("backend", "").lower() if isinstance(model_config, dict) else ""
+    api_url = config.get("api_url", "")
+    if backend_name in ("llama.cpp", "llamacpp") or (api_url and "llamacpp" in api_url.lower()):
+        api_timeout = 369
+        logger.info("检测到 llamacpp 后端，设置超时为 369 秒")
+    
     logger.info(f"API请求超时设置: {api_timeout if api_timeout is not None else '无限制'}")
     
     # 这里是测试执行的具体逻辑

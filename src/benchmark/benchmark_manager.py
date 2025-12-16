@@ -609,6 +609,12 @@ class BenchmarkManager:
             else:
                 logger.warning(f"跳过model_params更新：不是字典类型，而是{type(model_params).__name__}")
             
+            # 对于 llamacpp 后端，使用 369 秒超时
+            backend_name = model_config.get("backend", "").lower() if isinstance(model_config, dict) else ""
+            if backend_name in ("llama.cpp", "llamacpp") or (api_url and "llamacpp" in api_url.lower()):
+                api_timeout = 369
+                logger.info("检测到 llamacpp 后端，设置超时为 369 秒")
+            
             # 执行测试
             config = {
                 "model_config": model_config,

@@ -145,6 +145,10 @@ class TestManager(QObject):
         retry_count = config.get("test.retry_count", 1)
 
         backend_name = model_config.get("backend", "openai")
+        # 对于 llamacpp 后端，使用 369 秒超时
+        if backend_name.lower() in ("llama.cpp", "llamacpp"):
+            timeout = 369
+        
         backend_cls = get_backend_class(backend_name)
 
         options = BackendOptions(

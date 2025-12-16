@@ -1,0 +1,91 @@
+{
+    "window": {
+        "title": "DeepStressModel",
+        "width": 1273,
+        "height": 1049,
+        "language": "zh_CN"
+    },
+    "openai_api": {
+        "stream_mode": true
+    },
+    "gpu": {
+        "poll_interval": 0.5
+    },
+    "gpu_monitor": {
+        "update_interval": 2.0,
+        "history_size": 60,
+        "remote": {
+            "enabled": false
+        }
+    },
+    "benchmark": {
+        "server_url": "https://tops.ginease.cn:4433",
+        "connect_timeout": 10,
+        "max_retries": 3,
+        "enabled": true,
+        "result_exporter": {
+            "auto_export": false,
+            "default_format": "json"
+        },
+        "mode": 0,
+        "api_key": "",
+        "device_id": "b23e65f4-985f-4ae3-925a-665143301b87",
+        "nickname": "未命名设备"
+    },
+    "openai_benchmarks": {
+        "defaults": {
+            "chat_path": "/chat/completions",
+            "extra_headers": {},
+            "extra_body_params": {},
+            "precision": "bf16"
+        },
+        "vllm": {
+            "api_url": "http://localhost:8000/v1",
+            "api_key": "",
+            "model": "Qwen3-80B-A3B",
+            "precision": "bf16",
+            "extra_body_params": {}
+        },
+        "llamacpp": {
+            "api_url": "http://localhost:8000/v1",
+            "api_key": "",
+            "model": "Qwen3-80B-A3B",
+            "precision": "gguf",
+            "extra_body_params": {}
+        },
+        "sglang": {
+            "api_url": "http://localhost:8000/v1",
+            "api_key": "",
+            "model": "Qwen3-80B-A3B",
+            "precision": "bf16",
+            "extra_body_params": {}
+        },
+        "tgi": {
+            "api_url": "",
+            "api_key": "",
+            "model": "",
+            "precision": "bf16",
+            "extra_body_params": {}
+        }
+    },
+    "load_test": {
+        "default_dataset": "基础问答",
+        "concurrency": 4,
+        "qps": null,
+        "duration_seconds": 30,
+        "total_requests": 40,
+        "max_new_tokens": 256,
+        "stream": true,
+        "gpu_sample_interval": 2.0
+    },
+    "test": {
+        "default_concurrency": 1,
+        "max_concurrency": 9999,
+        "timeout": 60,
+        "retry_count": 1
+    },
+    "models": {},
+    "app": {
+        "language": "zh_CN"
+    }
+}
