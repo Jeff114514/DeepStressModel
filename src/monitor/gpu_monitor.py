@@ -477,12 +477,22 @@ class GPUMonitorManager:
 
     def _init_local_monitor(self):
         """初始化本地监控器"""
+        # 如果已经尝试过初始化但失败了，直接返回，避免重复尝试和报错
+        if hasattr(self, '_local_init_failed') and self._local_init_failed:
+            return
+        
         try:
             self._local_monitor = LocalGPUMonitor()
             self.monitor = self._local_monitor
             logger.info("已启用本地GPU监控（使用 nvidia-smi）")
+            # 如果之前失败过但现在成功了，重置标志
+            if hasattr(self, '_local_init_failed'):
+                self._local_init_failed = False
         except Exception as exc:  # noqa: BLE001
-            logger.warning(f"本地GPU监控初始化失败: {exc}")
+            # 只在第一次失败时记录日志
+            if not hasattr(self, '_local_init_failed') or not self._local_init_failed:
+                logger.warning("本地GPU监控初始化失败: %s (后续错误将静默处理)", exc)
+                self._local_init_failed = True
             self.monitor = None
     
     def get_stats(self) -> Optional[GPUStats]:
