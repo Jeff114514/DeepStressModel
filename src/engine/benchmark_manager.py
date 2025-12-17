@@ -198,7 +198,6 @@ class BenchmarkManager:
                 "model": config["model"],
                 "model_config": config.get("model_config", {}),  # 添加完整的模型配置
                 "model_params": config.get("model_params", 0),  # 添加模型参数量
-                "precision": config["precision"],
                 "framework_config": config["framework_config"],
                 "start_time": datetime.fromtimestamp(start_time).isoformat(),
                 "end_time": datetime.fromtimestamp(end_time).isoformat(),

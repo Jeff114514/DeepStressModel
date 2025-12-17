@@ -132,7 +132,6 @@ class APIClient:
         chat_path: str = "/chat/completions",
         extra_headers: Optional[Dict[str, str]] = None,
         extra_body_params: Optional[Dict[str, Any]] = None,
-        precision: Optional[str] = None,
         stream: Optional[bool] = None
     ):
         # 确保 API URL 格式正确
@@ -158,9 +157,6 @@ class APIClient:
             "temperature": temperature,
             "top_p": top_p
         }
-        if precision:
-            # 兼容不同后端的精度参数
-            self.model_params["precision"] = precision
         if extra_body_params:
             self.model_params.update(extra_body_params)
         # 允许覆盖流模式

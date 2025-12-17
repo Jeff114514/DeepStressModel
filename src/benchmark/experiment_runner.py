@@ -86,7 +86,6 @@ def _default_result_dir(backend: str) -> str:
 
 async def _run_case(
     backend: str,
-    precision: str,
     concurrency: int,
     qps: float,
     max_new_tokens: int,
@@ -103,7 +102,6 @@ async def _run_case(
 
     tester = LoadTester(
         backend_name=backend,
-        precision=precision,
         concurrency=concurrency,
         qps=qps,
         total_requests=total_requests,
@@ -131,7 +129,6 @@ def _save_summary_csv(rows: List[Dict[str, Any]], out_dir: str) -> str:
 
     fieldnames = [
         "backend",
-        "precision",
         "concurrency",
         "qps_target",
         "qps_observed",
@@ -160,7 +157,6 @@ def _save_summary_csv(rows: List[Dict[str, Any]], out_dir: str) -> str:
             writer.writerow(
                 {
                     "backend": r.get("backend"),
-                    "precision": r.get("precision"),
                     "concurrency": r.get("concurrency"),
                     "qps_target": r.get("qps_target"),
                     "qps_observed": r.get("qps_observed"),
@@ -225,7 +221,6 @@ def _plot_compare(rows: List[Dict[str, Any]], out_dir: str):
 
 async def main_async(args: argparse.Namespace):
     backend = args.backend
-    precision = args.precision
     concurrency_list = _parse_int_list(args.concurrency, [1, 2, 4, 8])
     prompt_lens = _parse_int_list(args.prompt_len, [32, 128, 512])
     rounds_list = _parse_int_list(args.rounds, [1])
@@ -265,7 +260,6 @@ async def main_async(args: argparse.Namespace):
     try:
         await _run_case(
             backend=backend,
-            precision=precision,
             concurrency=4,
             qps=qps,
             max_new_tokens=max_new_tokens,
@@ -287,7 +281,6 @@ async def main_async(args: argparse.Namespace):
                 logger.info("运行实验: 并发=%s, prompt_len=%s, rounds=%s", conc, plen, rnd)
                 summary = await _run_case(
                     backend=backend,
-                    precision=precision,
                     concurrency=conc,
                     qps=qps,
                     max_new_tokens=max_new_tokens,
@@ -316,7 +309,6 @@ def main():
     defaults = config.get("load_test", {}) or {}
     parser = argparse.ArgumentParser(description="批量压测对比")
     parser.add_argument("--backend", default="vllm")
-    parser.add_argument("--precision", default=None)
     parser.add_argument("--concurrency", default="1,2,4,8", help="逗号分隔并发列表")
     parser.add_argument("--prompt_len", default="128,512", help="逗号分隔初始prompt长度列表")
     parser.add_argument("--rounds", default="1", help="逗号分隔对话轮次列表")

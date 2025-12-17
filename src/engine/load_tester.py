@@ -178,7 +178,6 @@ class LoadTester:
     def __init__(
         self,
         backend_name: str,
-        precision: Optional[str] = None,
         concurrency: int = 4,
         qps: Optional[float] = None,
         duration_seconds: Optional[int] = None,
@@ -192,7 +191,6 @@ class LoadTester:
     ):
         self.backend_name = backend_name
         self.backend_key = _normalize_backend_key(backend_name)
-        self.precision = precision
         self.concurrency = max(1, concurrency)
         self.qps = qps
         self.interval = 1 / qps if qps else None
@@ -231,18 +229,24 @@ class LoadTester:
             **defaults.get("extra_headers", {}),
             **backend_cfg.get("extra_headers", {}),
         }
-        if self.precision:
-            merged["precision"] = self.precision
         if self.stream is not None:
             merged["stream"] = self.stream
         return merged
 
     def _create_backend(self):
         backend_cls = get_backend_class(self.backend_name)
+        logger.info("创建后端: backend_name=%s, backend_key=%s, backend_class=%s", 
+                   self.backend_name, self.backend_key, backend_cls.__name__)
+        logger.info("后端配置: api_url=%s, model=%s, chat_path=%s", 
+                   self.backend_config.get("api_url"), 
+                   self.backend_config.get("model"),
+                   self.backend_config.get("chat_path"))
         backend_or_options = backend_cls.from_model_config(self.backend_config)
         # from_model_config 目前返回的就是实例，需兼容旧逻辑
         if isinstance(backend_or_options, BaseOpenAIBackend):
+            logger.info("后端实例创建成功: %s", type(backend_or_options).__name__)
             return backend_or_options
+        logger.info("使用BackendOptions创建后端实例")
         return backend_cls(backend_or_options)
 
     def _prepare_prompts(self) -> List[str]:
@@ -381,7 +385,6 @@ class LoadTester:
         summary = {
             "backend": self.backend_name,
             "model": self.backend_config.get("model"),
-            "precision": self.backend_config.get("precision"),
             "concurrency": self.concurrency,
             "qps_target": self.qps,
             "requests": len(self.results),
@@ -421,7 +424,7 @@ class LoadTester:
             "gpu_samples": self.gpu_samples,
             "cpu_samples": self.cpu_samples,
         }
-        filename = f"loadtest_{self.backend_key}_{summary.get('precision', 'na')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+        filename = f"loadtest_{self.backend_key}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
         filepath = os.path.join(self.result_dir, filename)
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
@@ -630,7 +633,8 @@ class LoadTester:
             return None
 
     async def run(self, save_result: bool = True) -> Tuple[Dict[str, Any], Optional[str]]:
-        prompts = self._prepare_prompts()
+        # 在后台线程中准备 prompts，避免阻塞事件循环
+        prompts = await asyncio.to_thread(self._prepare_prompts)
         queue: asyncio.Queue = asyncio.Queue()
 
         # 对于 llamacpp 后端，使用 369 秒超时
@@ -690,7 +694,6 @@ def parse_args() -> argparse.Namespace:
     defaults = config.get("load_test", {}) or {}
     parser = argparse.ArgumentParser(description="多后端 OpenAI 兼容压测")
     parser.add_argument("--backend", default="vllm", help="后端名称: vllm/llamacpp/sglang/tgi/openai")
-    parser.add_argument("--precision", default=None, help="精度: bf16/gguf 等")
     parser.add_argument("--concurrency", type=int, default=defaults.get("concurrency", 4))
     parser.add_argument("--qps", type=float, default=defaults.get("qps"))
     parser.add_argument("--duration", type=int, default=defaults.get("duration_seconds"))
@@ -708,7 +711,6 @@ def parse_args() -> argparse.Namespace:
 async def main_async(args: argparse.Namespace):
     tester = LoadTester(
         backend_name=args.backend,
-        precision=args.precision,
         concurrency=args.concurrency,
         qps=args.qps,
         duration_seconds=args.duration,

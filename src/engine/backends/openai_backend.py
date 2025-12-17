@@ -13,7 +13,6 @@ class BackendOptions:
     api_key: str = ""
     model: str = ""
     chat_path: str = "/chat/completions"
-    precision: Optional[str] = None
     extra_headers: Dict[str, str] = field(default_factory=dict)
     extra_body_params: Dict[str, Any] = field(default_factory=dict)
     stream: Optional[bool] = None
@@ -43,18 +42,25 @@ class BaseOpenAIBackend:
           - api_key: 认证key，可为空
           - model: 模型名称
           - chat_path: 自定义chat/completions路径（可选）
-          - precision: 精度，bf16/gguf/等（可选）
           - extra_headers: 额外HTTP头（可选）
           - extra_body_params: 额外请求体参数（可选）
           - stream: 是否强制流式（可选）
         """
+        from src.utils.logger import setup_logger
+        logger = setup_logger("openai_backend")
+        
+        api_url = model_config.get("api_url", "")
+        model = model_config.get("model", "")
+        chat_path = model_config.get("chat_path", cls.default_chat_path)
+        
+        logger.info("from_model_config: api_url=%s, model=%s, chat_path=%s", api_url, model, chat_path)
+        
         return cls(
             BackendOptions(
-                api_url=model_config.get("api_url", ""),
+                api_url=api_url,
                 api_key=model_config.get("api_key", ""),
-                model=model_config.get("model", ""),
-                chat_path=model_config.get("chat_path", cls.default_chat_path),
-                precision=model_config.get("precision"),
+                model=model,
+                chat_path=chat_path,
                 extra_headers=model_config.get("extra_headers", {}) or {},
                 extra_body_params=model_config.get("extra_body_params", {}) or {},
                 stream=model_config.get("stream"),
@@ -79,7 +85,6 @@ class BaseOpenAIBackend:
             chat_path=self.options.chat_path,
             extra_headers=self.options.extra_headers,
             extra_body_params=self.options.extra_body_params,
-            precision=self.options.precision,
             stream=self.options.stream,
             max_tokens=max_tokens or 2048,
             temperature=temperature or 0.7,

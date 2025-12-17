@@ -10,9 +10,6 @@ class TGIBackend(BaseOpenAIBackend):
     default_chat_path = "/chat/completions"
 
     def __init__(self, options: BackendOptions):
-        # TGI 通常支持bf16，保持precision透传
-        if options.precision is None:
-            options.precision = options.extra_body_params.get("precision")
         super().__init__(options)
 
 

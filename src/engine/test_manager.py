@@ -156,7 +156,6 @@ class TestManager(QObject):
             api_key=model_config.get("api_key", ""),
             model=model_config.get("model", ""),
             chat_path=model_config.get("chat_path", None),
-            precision=model_config.get("precision"),
             extra_headers=model_config.get("extra_headers", {}) or {},
             extra_body_params=model_config.get("extra_body_params", {}) or {},
             stream=model_config.get("stream"),
