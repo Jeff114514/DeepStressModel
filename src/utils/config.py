@@ -99,7 +99,7 @@ DEFAULT_CONFIG = {
         "qps": None,
         "duration_seconds": 30,
         "total_requests": 40,
-        "max_new_tokens": 256,
+        "max_new_tokens": 2048,
         "stream": True,
         "gpu_sample_interval": 2.0
     },

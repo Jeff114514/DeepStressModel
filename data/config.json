@@ -42,15 +42,14 @@
         "vllm": {
             "api_url": "http://localhost:8000/v1",
             "api_key": "",
-            "model": "Qwen3-80B-A3B",
-            "precision": "bf16",
+            "model": "Qwen3-235B-A22B-AWQ",
             "extra_body_params": {}
         },
         "llamacpp": {
             "api_url": "http://localhost:8000/v1",
             "api_key": "",
             "model": "Qwen3-80B-A3B",
-            "precision": "gguf",
+            "precision": "bf16",
             "extra_body_params": {}
         },
         "sglang": {
@@ -74,7 +73,7 @@
         "qps": null,
         "duration_seconds": 30,
         "total_requests": 40,
-        "max_new_tokens": 256,
+        "max_new_tokens": 2048,
         "stream": true,
         "gpu_sample_interval": 2.0
     },

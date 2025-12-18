@@ -183,7 +183,7 @@ class LoadTester:
         duration_seconds: Optional[int] = None,
         total_requests: Optional[int] = None,
         dataset_name: Optional[str] = None,
-        max_new_tokens: int = 256,
+        max_new_tokens: int = 2048,
         stream: Optional[bool] = None,
         timeout: Optional[int] = None,
         retry_count: Optional[int] = None,
@@ -699,7 +699,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--duration", type=int, default=defaults.get("duration_seconds"))
     parser.add_argument("--requests", type=int, default=defaults.get("total_requests"))
     parser.add_argument("--dataset", default=defaults.get("default_dataset"), help="数据集名称，留空则使用全部")
-    parser.add_argument("--max_new_tokens", type=int, default=defaults.get("max_new_tokens", 256))
+    parser.add_argument("--max_new_tokens", type=int, default=defaults.get("max_new_tokens", 2048))
     parser.add_argument("--stream", action="store_true", help="强制开启流式")
     parser.add_argument("--no-stream", dest="stream", action="store_false", help="强制关闭流式")
     parser.add_argument("--timeout", type=int, default=config.get("test.timeout", 60))

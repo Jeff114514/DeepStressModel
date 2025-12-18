@@ -94,11 +94,16 @@ async def _run_case(
     total_requests: int,
     use_local_dataset: bool,
     dataset_name: str | None,
-    save_result: bool = True
+    save_result: bool = True,
+    stream: bool | None = None,
 ) -> Dict[str, Any]:
     prompts = None
     if not use_local_dataset:
         prompts = _build_prompts(prompt_len, rounds, max(total_requests, concurrency))
+
+    stream_mode = stream
+    if stream_mode is None:
+        stream_mode = config.get("openai_benchmarks.defaults.stream", True)
 
     tester = LoadTester(
         backend_name=backend,
@@ -108,7 +113,7 @@ async def _run_case(
         max_new_tokens=max_new_tokens,
         prompts_override=prompts,
         dataset_name=dataset_name,
-        stream=config.get("openai_benchmarks.defaults.stream", True),
+        stream=stream_mode,
     )
     summary, path = await tester.run(save_result=save_result)
     if save_result:
@@ -269,6 +274,7 @@ async def main_async(args: argparse.Namespace):
             use_local_dataset=use_local_dataset,
             dataset_name=dataset_name,
             save_result=False,
+            stream=args.stream,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("warmup 失败，但将继续正式实验: %s", exc)
@@ -289,6 +295,7 @@ async def main_async(args: argparse.Namespace):
                     total_requests=total_requests,
                     use_local_dataset=use_local_dataset,
                     dataset_name=dataset_name,
+                    stream=args.stream,
                 )
                 rows.append(summary)
 
@@ -314,9 +321,12 @@ def main():
     parser.add_argument("--rounds", default="1", help="逗号分隔对话轮次列表")
     parser.add_argument("--qps", type=float, default=defaults.get("qps"))
     parser.add_argument("--requests", type=int, default=defaults.get("total_requests", 20))
-    parser.add_argument("--max_new_tokens", type=int, default=defaults.get("max_new_tokens", 256))
+    parser.add_argument("--max_new_tokens", type=int, default=defaults.get("max_new_tokens", 2048))
     parser.add_argument("--dataset_path", default=None, help="本地数据集文件路径（JSON，包含data）")
     parser.add_argument("--dataset_name", default=None, help="已加载的数据集名称，使用本地数据集时 prompt_len/rounds 将失效")
+    parser.add_argument("--stream", dest="stream", action="store_true", help="强制启用流式输出")
+    parser.add_argument("--no-stream", dest="stream", action="store_false", help="禁用流式输出")
+    parser.set_defaults(stream=None)
     args = parser.parse_args()
     asyncio.run(main_async(args))
 

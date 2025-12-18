@@ -534,7 +534,7 @@ class BenchmarkManager:
             model_params = dict(model_params)
             
         # 添加max_tokens限制
-        model_params["max_tokens"] = 500  # 限制返回token数量为500
+        model_params["max_tokens"] = 2048  # 限制返回token数量为2048
         
         # 添加数据集验证逻辑 - 严格要求必须更新或上传测试数据集
         if not hasattr(self, 'dataset_updated') or not self.dataset_updated:
@@ -655,7 +655,7 @@ class BenchmarkManager:
                 r["input_chars"] = len(input_text)
                 r["output_chars"] = len(output_text)
                 
-                # 检查是否截断了输出（基于max_tokens=500的限制）
+                # 检查是否截断了输出（基于max_tokens=2048的限制）
                 output_tokens = r.get("output_tokens", 0)
                 r["truncated"] = output_tokens >= 500  # 如果输出token数达到或接近500，认为被截断
             
