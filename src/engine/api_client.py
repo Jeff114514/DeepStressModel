@@ -285,15 +285,16 @@ class APIClient:
                 data_received_count += 1
                 
                 # 检查连接状态 - 在读取数据前检查，避免在已关闭的连接上操作
+                may_continue = True
                 if response.closed:
-                    logger.warning("检测到响应连接已关闭（在读取数据时）")
+                    # logger.warning("检测到响应连接已关闭（在读取数据时）")
                     # 如果已经收到一些数据，可能是正常结束；如果没有数据，可能是服务器主动断开
                     if data_received_count == 0:
                         raise aiohttp.ServerDisconnectedError("服务器在响应开始前断开连接")
                     else:
-                        logger.info(f"连接已关闭，但已收到 {data_received_count} 个数据块，可能是正常结束")
-                        break
-                try:
+                        # logger.info(f"连接已关闭，但已收到 {data_received_count} 个数据块，可能是正常结束")
+                        may_continue = False
+                if may_continue:
                     line = line.decode('utf-8').strip()
                     if not line:  # 空行，跳过
                         continue
